@@ -1,29 +1,53 @@
-export interface HistoryPhrase {
-  text: string;          // full phrase the user typed
-  count: number;         // how many times they typed it
-  lastUsed: number;      // timestamp
-  context: string;       // "email" | "search" | "general"
+export interface Snippet {
+  id: string;
+  shortcut: string;
+  label: string;
+  content: string;
+  tags: string[];
+  usageCount: number;
+  lastUsed: number | null;
+  createdAt: number;
+  updatedAt: number;
+  syncedAt?: number;
 }
 
-export interface Suggestion {
-  text: string;          // the completion (suffix after what user typed)
-  full: string;          // full phrase
-  score: number;         // ranking score 0–1
-  source: "history" | "ai";
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar: string;
+  token: string;
 }
 
 export interface Settings {
   enabled: boolean;
   aiEnabled: boolean;
-  apiKey: string;
-  minChars: number;      // min chars before suggesting (default: 3)
-  maxHistory: number;    // max phrases to store (default: 500)
+  geminiApiKey: string;
+  minChars: number;
+  maxSuggestions: number;
+  keyboardShortcut: string;
   excludedSites: string[];
+  cloudSyncEnabled: boolean;
+  backendUrl: string;
+}
+
+export interface AnalyticsEntry {
+  snippetId: string;
+  usedAt: number;
+  site: string;
+  trigger: "shortcut" | "keyboard" | "ai";
+}
+
+export interface AISuggestion {
+  text: string;
+  confidence: number;
+  source: "history" | "ai";
 }
 
 export type MessageType =
   | { type: "GET_SUGGESTIONS"; prefix: string; context: string }
-  | { type: "RECORD_PHRASE"; text: string; context: string }
-  | { type: "SUGGESTIONS_RESULT"; suggestions: Suggestion[] }
+  | { type: "INSERT_SNIPPET"; snippetId: string; trigger: string }
+  | { type: "RECORD_USAGE"; snippetId: string; site: string; trigger: string }
+  | { type: "SYNC_TO_CLOUD" }
   | { type: "GET_SETTINGS" }
-  | { type: "SETTINGS_RESULT"; settings: Settings };
+  | { type: "OPEN_POPUP" };

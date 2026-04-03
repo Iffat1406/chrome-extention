@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useHistory } from "../hooks/useHistory";
 
@@ -11,8 +11,11 @@ export default function History() {
     (e) => filter === "all" || e.source === filter
   );
 
+  // eslint-disable-next-line react-hooks/purity
+  const now = useMemo(() => Date.now(), []);
+
   function formatTime(ts: number): string {
-    const diff = Date.now() - ts;
+    const diff = now - ts;
     if (diff < 60_000) return "just now";
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
