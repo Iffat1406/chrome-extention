@@ -113,9 +113,9 @@ export default function Settings() {
                 <input
                   type={apiKeyVisible ? "text" : "password"}
                   placeholder="sk-ant-..."
-                  value={settings.apiKey}
-                  onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                  onBlur={() => handleSave({ apiKey: settings.apiKey })}
+                  value={settings.geminiApiKey}
+                  onChange={(e) => updateSettings({ geminiApiKey: e.target.value })}
+                  onBlur={() => handleSave({ geminiApiKey: settings.geminiApiKey })}
                   className="flex-1 px-3 py-2 text-xs font-mono border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 placeholder-gray-400"
                 />
                 <button
@@ -167,9 +167,9 @@ export default function Settings() {
             {["Space", "Enter", "Tab"].map((key) => (
               <button
                 key={key}
-                onClick={() => handleSave({ triggerKey: key })}
+                onClick={() => handleSave({ keyboardShortcut: key })}
                 className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${
-                  settings.triggerKey === key
+                  settings.keyboardShortcut === key
                     ? "border-violet-400 bg-violet-50 text-violet-700 font-medium"
                     : "border-gray-200 text-gray-500 hover:border-gray-300"
                 }`}

@@ -187,6 +187,7 @@ chrome-extention/
 - **Keyboard Shortcuts**: Trigger snippets with custom shortcut sequences (e.g., `/addr`)
 - **Labels & Tags**: Organize snippets with descriptive labels and tags
 - **Usage Tracking**: Automatic tracking of snippet usage count and last used date
+- **Auto-Generation**: Snippets created automatically from frequently-used text patterns
 
 **Data Model:**
 ```typescript
@@ -209,6 +210,7 @@ interface Snippet {
 - **Fuzzy Content Matching**: Find snippets by partial label/content text
 - **AI Completions**: Claude API integration for context-aware suggestions
 - **Ranking**: Sort results by relevance score and usage frequency
+- **IDE-Style Autocomplete**: Type text → see dropdown with matching snippets → Tab to insert
 
 **Matching Algorithm:**
 1. Exact shortcut match (confidence: 1.0)
@@ -216,7 +218,50 @@ interface Snippet {
 3. Fuzzy label/content match (confidence: 0.4-0.9 based on similarity)
 4. AI-powered completions (fallback when no local matches)
 
-### 3. Cloud Synchronization
+### 3. Automatic Pattern Learning
+- **Smart Pattern Detection**: Learns from repeatedly-typed text
+- **Usage Threshold**: Suggests snippet creation after text is typed 3+ times
+- **No Manual Entry**: Users don't manually create snippets—they appear as suggestions
+- **Pattern Expiry**: Old patterns fade away (30-day sliding window)
+- **One-Click Creation**: Convert pattern to snippet with auto-generated shortcut
+
+**Pattern Detection Flow:**
+1. User types text repeatedly on websites
+2. Extension tracks text patterns in local storage
+3. After 3 occurrences, pattern appears in "Quick Open" as "LEARN" suggestion
+4. User clicks "Create snippet" → auto-generates shortcut & saves
+
+**Example Pattern Learning:**
+```
+User types "asynchronous programming" 3 times
+→ Extension suggests: "asynchronous programming" (seen 3 times)
+→ User clicks → Auto-shortcut: "/ap"
+→ Snippet created: /ap → "asynchronous programming"
+```
+
+### 4. Automatic Shortcut Generation
+- **First-Letter Based**: "Hello World" → `/hw`
+- **Consonant-Based**: "Email" → `/ml`
+- **Smart Fallback**: "asynchronous" → `/asy`
+- **Conflict Resolution**: Auto-appends numbers if shortcut taken (`/hw2`, `/hw3`)
+- **Multiple Options**: Show 3 alternatives for user to choose from
+
+**Generation Strategies:**
+```typescript
+// Strategy 1: First letters of words
+"Your Company Name" → "/ycn"
+
+// Strategy 2: Consonants (for single words)
+"Programming" → "/prgrm"
+
+// Strategy 3: Beginning characters
+"asynchronous" → "/asy"
+
+// Auto-resolve conflicts
+"/hw" taken → "/hw2" → "/hw3"
+```
+
+### 5. Cloud Synchronization
 - **Cross-Device Sync**: Access snippets across any device where extension is installed
 - **Last-Write-Wins Merge**: Conflict resolution based on `updatedAt` timestamp
 - **User Authentication**: JWT-based auth tokens for secure API access
@@ -228,7 +273,7 @@ Local Change → Debounce 5000ms → Sync to Cloud
 Cloud Change (another device) → Fetch on startup → Merge locally
 ```
 
-### 4. Usage Analytics
+### 6. Usage Analytics
 - **Local Analytics**: Track every snippet expansion with context
 - **History View**: Browse all expansions with timestamps and site info
 - **Usage Statistics**: Total expansions, per-snippet counts, top shortcuts
@@ -244,7 +289,7 @@ interface AnalyticsEntry {
 }
 ```
 
-### 5. Settings & Configuration
+### 7. Settings & Configuration
 - **Global Settings**:
   - Enable/disable extension
   - AI suggestions toggle
@@ -468,6 +513,64 @@ No external state management library (Redux/Zustand) needed currently due to Chr
 - **Action Popup**: Extension popup UI (470px wide, flexible height)
 - **Icons**: Multiple sizes for toolbar display
 
+### New Components for Auto-Snippet Creation
+
+#### Pattern Detector (`background/patternDetector.ts`)
+**Purpose**: Learn from user typing patterns and suggest snippet creation
+
+**Key Functions:**
+- `recordPattern(text)` - Track text user types
+- `getPatterns()` - Retrieve patterns from storage
+- `getSuggestionPatterns()` - Get patterns ready for snippets (3+ occurrences)
+- `removePattern(text)` - Remove pattern from suggestions
+
+**Storage Structure:**
+```typescript
+// chrome.storage.local
+{
+  patterns: {
+    "hello world": {
+      text: "hello world",
+      count: 5,
+      lastSeen: 1712145600000,
+      suggestedShortcut: "/hw"
+    },
+    // ... more patterns
+  }
+}
+```
+
+#### Shortcut Generator (`background/shortcutGenerator.ts`)
+**Purpose**: Auto-generate meaningful shortcuts from text content
+
+**Key Functions:**
+- `generateShortcut(text)` - Generate single shortcut (e.g., "/hw")
+- `generateUniqueShortcut(text)` - Auto-resolve conflicts ("/hw2", "/hw3")
+- `suggestShortcuts(text)` - Return 3 alternative shortcuts for user choice
+- `checkShortcutAvailable(shortcut)` - Check if shortcut is taken
+
+**Algorithm:**
+1. Try first letters of words
+2. Try consonants (skip vowels) for word compression
+3. Try beginning characters for long words
+4. Append numbers to resolve conflicts
+
+#### Quick-Open Component (`components/QuickOpen.tsx`)
+**Purpose**: IDE-style Cmd+K / Ctrl+Shift+P command palette
+
+**Features:**
+- Search snippets by shortcut, label, or content
+- Show "LEARN" suggestions for patterns awaiting creation
+- Keyboard navigation (arrows, Enter, Escape)
+- Click to select or see pattern details
+- One-click snippet creation from patterns
+
+**Keyboard Shortcuts:**
+- `Ctrl+Shift+P` / `Cmd+Shift+P` - Open quick-open
+- `↑` / `↓` - Navigate results
+- `Enter` - Select item or create snippet
+- `Esc` - Close
+
 ### Content Script
 
 **Purpose**: Detect when user is typing snippet triggers and show suggestions.
@@ -476,14 +579,21 @@ No external state management library (Redux/Zustand) needed currently due to Chr
 1. Monitor user input in all text fields (`<input>`, `<textarea>`, `contenteditable`)
 2. Detect `/shortcut` patterns and contextual cues
 3. Request suggestions from background worker
-4. Render overlay UI with suggestions
-5. Insert selected snippet into page
-6. Track usage (trigger type, site, timestamp)
+4. Track text patterns for learning
+5. Render overlay UI with suggestions
+6. Insert selected snippet into page
+7. Track usage (trigger type, site, timestamp)
 
 **Key Files**:
-- `content/triggerDetector.ts` - Detects when to request suggestions
+- `content/triggerDetector.ts` - Detects when to request suggestions + tracks patterns
 - `content/overLayout.ts` - Renders suggestion overlay UI
 - `content/textInserter.ts` - Inserts text into active element
+- `content/index.ts` - Content script entry point
+
+**Updated Pattern Tracking:**
+- On Enter key: Records full line as potential pattern
+- On space key: Records individual words as patterns
+- Background worker dedupes and aggregates
 
 ### Background Service Worker
 
@@ -494,15 +604,28 @@ No external state management library (Redux/Zustand) needed currently due to Chr
 2. Query local snippets via `chrome.storage.sync.get`
 3. Match user input against snippets (exact, prefix, fuzzy)
 4. Call Claude API for AI suggestions
-5. Handle cloud sync (upload/download from backend)
-6. Aggregate analytics data
-7. Manage user authentication state
+5. Detect and process text patterns
+6. Generate shortcuts automatically
+7. Create snippets from patterns
+8. Handle cloud sync (upload/download from backend)
+9. Aggregate analytics data
+10. Manage user authentication state
 
 **Key Files**:
 - `background/index.ts` - Main logic and message handlers
 - `background/snipMatcher.ts` - Fuzzy matching algorithm
 - `background/aiEngine.ts` - Claude API integration
 - `background/cloudSync.ts` - Cloud sync logic
+- `background/patternDetector.ts` - Pattern learning
+- `background/shortcutGenerator.ts` - Auto-shortcut creation
+
+**New Message Types:**
+```typescript
+{ type: "RECORD_TEXT"; text: string }
+{ type: "GET_PATTERNS" }
+{ type: "CREATE_SNIPPET_FROM_PATTERN"; pattern: string }
+{ type: "SUGGEST_SHORTCUT"; text: string }
+```
 
 ### Popup UI
 
@@ -513,11 +636,12 @@ No external state management library (Redux/Zustand) needed currently due to Chr
 2. **AddSnippet** - Create/edit snippet form
 3. **History** - View past expansions with stats
 4. **Settings** - Configure extension behavior
+5. **QuickOpen** - Global search & pattern suggestions (Cmd+K)
 
 **Entry Point**:
 - `popup/index.html` - Contains `<div id="root">`
 - `popup/main.tsx` - React root with router
-- `popup/Popup.tsx` - Router component defining routes
+- `popup/Popup.tsx` - Router component defining routes + QuickOpen
 
 ---
 

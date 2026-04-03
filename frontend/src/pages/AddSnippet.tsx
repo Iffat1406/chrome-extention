@@ -42,7 +42,15 @@ export default function AddSnippet() {
       if (isEditing && id) {
         await updateSnippet(id, { label: label.trim(), shortcut: shortcut.trim(), content: content.trim() });
       } else {
-        await addSnippet({ label: label.trim(), shortcut: shortcut.trim(), content: content.trim() });
+        await addSnippet({
+          label: label.trim(),
+          shortcut: shortcut.trim(),
+          content: content.trim(),
+          tags: [],
+          usageCount: 0,
+          lastUsed: null,
+          updatedAt: Date.now(),
+        });
       }
       navigate("/");
     } catch {

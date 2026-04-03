@@ -5,6 +5,18 @@ import type { AISuggestion } from "../types";
 
 const detector = new TriggerDetector();
 
+// Track text patterns for automatic snippet suggestions
+async function recordTextPattern(text: string) {
+  try {
+    await chrome.runtime.sendMessage({
+      type: "RECORD_TEXT",
+      text,
+    });
+  } catch {
+    // Extension context may not be available
+  }
+}
+
 document.addEventListener("keydown", (e) => {
   const target = e.target as HTMLElement;
   const isEditable =
@@ -14,18 +26,22 @@ document.addEventListener("keydown", (e) => {
 
   if (!isEditable) return;
 
-  detector.onKeydown(e, async (context) => {
-    const suggestions: AISuggestion[] = await chrome.runtime.sendMessage({
-      type: "GET_SUGGESTIONS",
-      context,
-    });
+  detector.onKeydown(
+    e,
+    async (context) => {
+      const suggestions: AISuggestion[] = await chrome.runtime.sendMessage({
+        type: "GET_SUGGESTIONS",
+        context,
+      });
 
-    if (suggestions.length === 0) return;
+      if (suggestions.length === 0) return;
 
-    showOverlay(suggestions, target, (chosen: string) => {
-      insertText(target, chosen);
-      hideOverlay();
-      detector.reset();
-    });
-  });
+      showOverlay(suggestions, target, (chosen: string) => {
+        insertText(target, chosen);
+        hideOverlay();
+        detector.reset();
+      });
+    },
+    recordTextPattern
+  );
 });

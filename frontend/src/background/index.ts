@@ -1,6 +1,8 @@
 import type { MessageType, Settings, Snippet, AnalyticsEntry, User } from "../types";
 import { getGeminiSuggestions } from "./geminiEngine";
 import { syncToCloud, syncFromCloud } from "./cloudSync";
+import { recordPattern, getSuggestionPatterns, removePattern } from "./patternDetector";
+import { generateUniqueShortcut, suggestShortcuts } from "./shortcutGenerator";
 
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
@@ -57,6 +59,26 @@ chrome.runtime.onMessage.addListener((msg: MessageType, _sender, reply) => {
     chrome.storage.sync.get("settings", (data) => {
       reply({ settings: { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) } });
     });
+    return true;
+  }
+
+  if (msg.type === "RECORD_TEXT") {
+    recordPattern(msg.text).then(() => reply({ success: true }));
+    return true;
+  }
+
+  if (msg.type === "GET_PATTERNS") {
+    getSuggestionPatterns().then((patterns) => reply({ patterns }));
+    return true;
+  }
+
+  if (msg.type === "SUGGEST_SHORTCUT") {
+    suggestShortcuts(msg.text).then((shortcuts) => reply({ shortcuts }));
+    return true;
+  }
+
+  if (msg.type === "CREATE_SNIPPET_FROM_PATTERN") {
+    handleCreateFromPattern(msg.pattern).then(reply);
     return true;
   }
 });
@@ -144,4 +166,35 @@ async function handleCloudSync() {
     return { success: false, error: "Cloud sync not configured" };
   }
   return syncToCloud(settings, user.token);
+}
+
+async function handleCreateFromPattern(patternText: string) {
+  try {
+    // Generate a snippet from detected pattern
+    const shortcut = await generateUniqueShortcut(patternText);
+    const newSnippet: Snippet = {
+      id: crypto.randomUUID(),
+      shortcut,
+      label: patternText.slice(0, 50),  // First 50 chars as label
+      content: patternText,
+      tags: ["auto-generated"],
+      usageCount: 0,
+      lastUsed: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    // Add to snippets
+    const { snippets: raw } = await chrome.storage.sync.get("snippets");
+    const snippets: Snippet[] = (raw as Snippet[] | undefined) ?? [];
+    snippets.push(newSnippet);
+    await chrome.storage.sync.set({ snippets });
+
+    // Remove the pattern so it's not suggested again
+    await removePattern(patternText);
+
+    return { success: true, snippet: newSnippet };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
 }

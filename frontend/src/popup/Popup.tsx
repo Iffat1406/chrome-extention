@@ -1,10 +1,70 @@
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import Home from "../pages/Home";
 import AddSnippet from "../pages/AddSnippet";
 import Settings from "../pages/Settings";
 import History from "../pages/History";
+import { QuickOpen } from "../components/QuickOpen";
+import type { Snippet, TextPattern } from "../types";
 
 export default function Popup() {
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [patterns, setPatterns] = useState<TextPattern[]>([]);
+
+  // Load snippets and patterns
+  useEffect(() => {
+    const loadData = async () => {
+      const { snippets: raw } = await chrome.storage.sync.get("snippets");
+      setSnippets((raw as Snippet[] | undefined) ?? []);
+
+      const { patterns: rawPatterns } = await chrome.storage.local.get("patterns");
+      const allPatterns = Object.values(rawPatterns as Record<string, TextPattern> || {});
+      setPatterns(
+        allPatterns
+          .filter((p: TextPattern) => p.count >= 3)
+          .sort((a: TextPattern, b: TextPattern) => b.count - a.count)
+          .slice(0, 10)
+      );
+    };
+
+    loadData();
+  }, []);
+
+  // Ctrl+Shift+P to open quick-open
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyP") {
+        e.preventDefault();
+        setQuickOpenOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const handleSelectSnippet = async (snippet: Snippet) => {
+    // Copy to clipboard
+    await navigator.clipboard.writeText(snippet.content);
+    // Optionally notify user
+    alert(`Copied: ${snippet.label}`);
+  };
+
+  const handleCreateFromPattern = async (pattern: TextPattern) => {
+    const result = await chrome.runtime.sendMessage({
+      type: "CREATE_SNIPPET_FROM_PATTERN",
+      pattern: pattern.text,
+    });
+
+    if (result.success) {
+      // Refresh snippets
+      const { snippets: raw } = await chrome.storage.sync.get("snippets");
+      setSnippets((raw as Snippet[] | undefined) ?? []);
+      alert(`Created snippet: ${result.snippet.shortcut}`);
+    }
+  };
+
   return (
     <MemoryRouter initialEntries={["/"]}>
       <div className="w-80 h-[520px] flex flex-col bg-white overflow-hidden">
@@ -15,13 +75,21 @@ export default function Popup() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/history" element={<History />} />
         </Routes>
-        <BottomNav />
+        <BottomNav onQuickOpen={() => setQuickOpenOpen(true)} />
       </div>
+      <QuickOpen
+        isOpen={quickOpenOpen}
+        onClose={() => setQuickOpenOpen(false)}
+        snippets={snippets}
+        patterns={patterns}
+        onSelectSnippet={handleSelectSnippet}
+        onCreateFromPattern={handleCreateFromPattern}
+      />
     </MemoryRouter>
   );
 }
 
-function BottomNav() {
+function BottomNav({ onQuickOpen }: { onQuickOpen: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -83,6 +151,16 @@ function BottomNav() {
           </button>
         );
       })}
+      <button
+        onClick={onQuickOpen}
+        className="flex-1 flex flex-col items-center gap-0.5 py-2 text-xs text-gray-400 hover:text-violet-600 transition-colors"
+        title="Quick Open (Ctrl+Shift+P)"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M6.5 12a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM13.5 13.5l2.85 2.85a1 1 0 01-1.42 1.42l-2.85-2.85a8 8 0 111.42-1.42z"/>
+        </svg>
+        <span className="text-xs">Cmd+K</span>
+      </button>
     </nav>
   );
 }

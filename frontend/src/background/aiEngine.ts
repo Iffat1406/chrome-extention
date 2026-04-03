@@ -1,10 +1,10 @@
-import type { Suggestion } from "../types";
+import type { AISuggestion } from "../types";
 
 export async function getAISuggestions(
   prefix: string,
   context: string,
   apiKey: string
-): Promise<Suggestion[]> {
+): Promise<AISuggestion[]> {
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

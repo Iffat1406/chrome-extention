@@ -38,7 +38,7 @@ function fuzzyScore(query: string, target: string): number {
 function matchByShortcut(
   context: string,
   snippets: Snippet[]
-): AISuggestion[] {
+): Array<{ text: string; confidence: number; source: "history" }> {
   // Extract shortcut token: leading "/" followed by word chars
   const shortcutMatch = context.match(/\/(\w+)$/);
   if (!shortcutMatch) return [];
@@ -53,8 +53,7 @@ function matchByShortcut(
     .map((s) => ({
       text: s.content,
       confidence: s.shortcut.replace(/^\//, "").toLowerCase() === typed ? 1 : 0.85,
-      source: "snippet" as const,
-      label: s.label,
+      source: "history" as const,
     }));
 }
 
@@ -64,7 +63,7 @@ function matchByShortcut(
 function matchByContent(
   context: string,
   snippets: Snippet[]
-): AISuggestion[] {
+): Array<{ text: string; confidence: number; source: "history" }> {
   const query = context.slice(-60); // use last 60 chars as query window
 
   return snippets
@@ -80,8 +79,7 @@ function matchByContent(
     .map(({ snippet, score }) => ({
       text: snippet.content,
       confidence: score,
-      source: "snippet" as const,
-      label: snippet.label,
+      source: "history" as const,
     }));
 }
 

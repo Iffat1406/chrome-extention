@@ -3,10 +3,15 @@ import { useStorage } from "./useStorage";
 import type { Settings } from "../types";
 
 const DEFAULT_SETTINGS: Settings = {
-  apiKey: "",
+  enabled: true,
   aiEnabled: false,
-  triggerKey: "Space",
+  geminiApiKey: "",
+  minChars: 3,
   maxSuggestions: 5,
+  keyboardShortcut: "Ctrl+Shift+Y",
+  excludedSites: [],
+  cloudSyncEnabled: false,
+  backendUrl: "http://localhost:4000",
 };
 
 /**
