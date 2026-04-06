@@ -1,75 +1,62 @@
-export interface Snippet {
+// Writing session - tracks user's writing activity
+export interface WritingSession {
   id: string;
-  shortcut: string;
-  label: string;
-  content: string;
-  tags: string[];
-  usageCount: number;
-  lastUsed: number | null;
-  createdAt: number;
-  updatedAt: number;
-  syncedAt?: number;
+  siteUrl: string;
+  siteName: string;
+  startTime: number;
+  endTime?: number;
+  content: string;           // Full text written
+  suggestions: AISuggestion[]; // AI suggestions made
+  appliedCount: number;       // How many suggestions user accepted
+  textAnalysis: TextAnalysis; // Grammar, tone, clarity scores
 }
 
-export interface User {
+// AI-generated suggestion for improving text
+export interface AISuggestion {
   id: string;
-  email: string;
-  name: string;
-  avatar: string;
-  token: string;
+  position: number;           // Character offset in text
+  length: number;             // Length of text being referenced
+  originalText: string;       // The text being suggested to improve
+  suggestion: string;         // Improved version
+  reason: "grammar" | "spelling" | "clarity" | "tone" | "completion"; // Why it's suggested
+  confidence: number;         // 0-1 confidence score
+  applied: boolean;           // Did user accept this?
+  appliedAt?: number;
 }
 
+// Analysis of user's writing
+export interface TextAnalysis {
+  grammarScore: number;       // 0-100
+  spellingErrors: number;
+  clarityScore: number;       // 0-100
+  toneAnalysis: string;       // "formal", "casual", "technical", etc
+  suggestedImprovements: string[];
+  readingLevel: string;       // "basic", "intermediate", "advanced"
+}
+
+// Settings for the writing assistant
 export interface Settings {
   enabled: boolean;
   aiEnabled: boolean;
   geminiApiKey: string;
-  minChars: number;
-  maxSuggestions: number;
-  keyboardShortcut: string;
+  model: "gemini" | "claude" | "gpt4";
+  analysisMode: "grammar" | "comprehensive" | "completion";
+  autoSuggest: boolean;
+  suggestionDelay: number;    // ms before showing suggestions
+  minTextLength: number;       // characters before analyzing
   excludedSites: string[];
   cloudSyncEnabled: boolean;
   backendUrl: string;
 }
 
-export interface AnalyticsEntry {
-  snippetId: string;
-  usedAt: number;
-  site: string;
-  trigger: "shortcut" | "keyboard" | "ai";
-}
-
-export interface AISuggestion {
-  text: string;
-  confidence: number;
-  source: "history" | "ai";
-}
-
-// Pattern detection for learning frequently-used text
-export interface TextPattern {
-  text: string;                  // The text that repeats
-  count: number;                 // How many times typed
-  lastSeen: number;              // Last timestamp
-  suggestedShortcut?: string;    // Auto-generated shortcut
-}
-
-// Suggestion result for autocomplete dropdown
-export interface SnippetSuggestion {
-  id: string;
-  shortcut: string;
-  label: string;
-  content: string;
-  source: "shortcut" | "label" | "content" | "pattern";  // Where it matched
-  matchScore: number;             // 0-1 relevance score
-}
-
+// Extended message types for AI writing assistant
 export type MessageType =
-  | { type: "GET_SUGGESTIONS"; prefix: string; context: string }
-  | { type: "INSERT_SNIPPET"; snippetId: string; trigger: string }
-  | { type: "RECORD_USAGE"; snippetId: string; site: string; trigger: string }
-  | { type: "SYNC_TO_CLOUD" }
+  | { type: "ANALYZE_TEXT"; text: string; context: string; siteUrl: string }
+  | { type: "GET_SUGGESTIONS"; text: string }
+  | { type: "APPLY_SUGGESTION"; suggestionId: string; sessionId: string }
+  | { type: "CREATE_SESSION"; siteUrl: string; siteName: string }
+  | { type: "END_SESSION"; sessionId: string }
+  | { type: "GET_SESSIONS" }
   | { type: "GET_SETTINGS" }
-  | { type: "OPEN_POPUP" }
-  | { type: "RECORD_TEXT"; text: string }  // Track user-typed text for patterns
-  | { type: "GET_PATTERNS" }               // Get detected text patterns
-  | { type: "CREATE_SNIPPET_FROM_PATTERN"; pattern: string }  // Auto-create from pattern
-  | { type: "SUGGEST_SHORTCUT"; text: string }  // Generate shortcut from text
+  | { type: "UPDATE_SETTINGS"; settings: Partial<Settings> }
+  | { type: "CLEAR_HISTORY" }

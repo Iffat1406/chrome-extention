@@ -1,24 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Smart Text Expander",
+  "name": "AI Writing Assistant",
   "version": "2.0.0",
-  "description": "AI-powered snippet manager with cloud sync, smart suggestions, and keyboard shortcuts.",
-  "permissions": ["storage", "activeTab", "scripting", "commands", "identity"],
+  "description": "Real-time AI writing assistant with grammar checking, clarity improvements, and tone analysis.",
+  "permissions": ["storage", "scripting"],
   "host_permissions": ["<all_urls>"],
-  "oauth2": {
-    "client_id": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
-    "scopes": ["openid", "email", "profile"]
-  },
-  "commands": {
-    "insert-snippet": {
-      "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "Command+Shift+Y" },
-      "description": "Open snippet picker on current page"
-    },
-    "toggle-extension": {
-      "suggested_key": { "default": "Ctrl+Shift+E", "mac": "Command+Shift+E" },
-      "description": "Enable/disable Smart Text Expander"
-    }
-  },
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_icon": {
@@ -35,8 +21,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["src/content/index.ts"],
-      "run_at": "document_idle",
-      "exclude_matches": ["chrome://*/*", "chrome-extension://*/*"]
+      "run_at": "document_idle"
     }
   ]
 }

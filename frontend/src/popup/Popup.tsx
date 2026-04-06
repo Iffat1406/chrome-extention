@@ -1,106 +1,74 @@
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import Home from "../pages/Home";
-import AddSnippet from "../pages/AddSnippet";
+import Dashboard from "../pages/Dashboard";
 import Settings from "../pages/Settings";
-import History from "../pages/History";
-import { QuickOpen } from "../components/QuickOpen";
-import type { Snippet, TextPattern } from "../types";
+import WritingHistory from "../pages/WritingHistory";
+import type { WritingSession } from "../types";
 
 export default function Popup() {
-  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
-  const [snippets, setSnippets] = useState<Snippet[]>([]);
-  const [patterns, setPatterns] = useState<TextPattern[]>([]);
+  const [sessions, setSessions] = useState<WritingSession[]>([]);
 
-  // Load snippets and patterns
+  // Load writing history and listen for changes
   useEffect(() => {
-    const loadData = async () => {
-      const { snippets: raw } = await chrome.storage.sync.get("snippets");
-      setSnippets((raw as Snippet[] | undefined) ?? []);
-
-      const { patterns: rawPatterns } = await chrome.storage.local.get("patterns");
-      const allPatterns = Object.values(rawPatterns as Record<string, TextPattern> || {});
-      setPatterns(
-        allPatterns
-          .filter((p: TextPattern) => p.count >= 3)
-          .sort((a: TextPattern, b: TextPattern) => b.count - a.count)
-          .slice(0, 10)
-      );
-    };
-
-    loadData();
-  }, []);
-
-  // Ctrl+Shift+P to open quick-open
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === "KeyP") {
-        e.preventDefault();
-        setQuickOpenOpen(true);
+    const loadSessions = async () => {
+      try {
+        const { sessions: raw } = await chrome.storage.local.get("sessions");
+        const sessionList = (raw as WritingSession[] | undefined) ?? [];
+        console.log("[Popup] 📊 Loaded sessions:", sessionList.length, "sessions found");
+        setSessions(sessionList);
+      } catch (err) {
+        console.error("[Popup] ❌ Failed to load sessions:", err);
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // Load sessions on mount
+    console.log("[Popup] 🚀 Popup component mounted, loading sessions...");
+    loadSessions();
+
+    // Listen for storage changes from content script
+    const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (changes.sessions) {
+        console.log("[Popup] 🔄 Storage changed! New sessions:", changes.sessions.newValue);
+        setSessions((changes.sessions.newValue as WritingSession[]) ?? []);
+      }
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+
+    // Also poll for changes every 2 seconds to ensure we always have fresh data
+    const pollInterval = setInterval(() => {
+      console.log("[Popup] 🔄 Polling for updates...");
+      loadSessions();
+    }, 2000);
+
+    return () => {
+      chrome.storage.onChanged.removeListener(handleStorageChange);
+      clearInterval(pollInterval);
+    };
   }, []);
-
-  const handleSelectSnippet = async (snippet: Snippet) => {
-    // Copy to clipboard
-    await navigator.clipboard.writeText(snippet.content);
-    // Optionally notify user
-    alert(`Copied: ${snippet.label}`);
-  };
-
-  const handleCreateFromPattern = async (pattern: TextPattern) => {
-    const result = await chrome.runtime.sendMessage({
-      type: "CREATE_SNIPPET_FROM_PATTERN",
-      pattern: pattern.text,
-    });
-
-    if (result.success) {
-      // Refresh snippets
-      const { snippets: raw } = await chrome.storage.sync.get("snippets");
-      setSnippets((raw as Snippet[] | undefined) ?? []);
-      alert(`Created snippet: ${result.snippet.shortcut}`);
-    }
-  };
 
   return (
     <MemoryRouter initialEntries={["/"]}>
-      <div className="w-80 h-[520px] flex flex-col bg-white overflow-hidden">
+      <div className="w-96 h-[600px] flex flex-col bg-white overflow-hidden">
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/add" element={<AddSnippet />} />
-          <Route path="/edit/:id" element={<AddSnippet />} />
+          <Route path="/" element={<Dashboard sessions={sessions} />} />
+          <Route path="/history" element={<WritingHistory sessions={sessions} />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/history" element={<History />} />
         </Routes>
-        <BottomNav onQuickOpen={() => setQuickOpenOpen(true)} />
+        <BottomNav />
       </div>
-      <QuickOpen
-        isOpen={quickOpenOpen}
-        onClose={() => setQuickOpenOpen(false)}
-        snippets={snippets}
-        patterns={patterns}
-        onSelectSnippet={handleSelectSnippet}
-        onCreateFromPattern={handleCreateFromPattern}
-      />
     </MemoryRouter>
   );
 }
 
-function BottomNav({ onQuickOpen }: { onQuickOpen: () => void }) {
+function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
-
-  // Hide nav on add/edit pages — full-screen form
-  const hideOn = ["/add", "/edit"];
-  if (hideOn.some((p) => location.pathname.startsWith(p))) return null;
 
   const tabs = [
     {
       path: "/",
-      label: "Snippets",
+      label: "Dashboard",
       icon: (
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M2 2.75A.75.75 0 012.75 2h10.5a.75.75 0 010 1.5H2.75A.75.75 0 012 2.75zm0 5A.75.75 0 012.75 7h10.5a.75.75 0 010 1.5H2.75A.75.75 0 012 7.75zM2.75 12a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z"/>
@@ -151,16 +119,6 @@ function BottomNav({ onQuickOpen }: { onQuickOpen: () => void }) {
           </button>
         );
       })}
-      <button
-        onClick={onQuickOpen}
-        className="flex-1 flex flex-col items-center gap-0.5 py-2 text-xs text-gray-400 hover:text-violet-600 transition-colors"
-        title="Quick Open (Ctrl+Shift+P)"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M6.5 12a5.5 5.5 0 100-11 5.5 5.5 0 000 11zM13.5 13.5l2.85 2.85a1 1 0 01-1.42 1.42l-2.85-2.85a8 8 0 111.42-1.42z"/>
-        </svg>
-        <span className="text-xs">Cmd+K</span>
-      </button>
     </nav>
   );
 }

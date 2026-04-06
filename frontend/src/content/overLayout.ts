@@ -1,347 +1,255 @@
-import type { AISuggestion } from "../types";
+import type { AISuggestion, TextAnalysis } from "../types";
 
-type SelectCallback = (text: string) => void;
-
-const OVERLAY_ID = "ste-overlay";
-const ITEM_CLASS = "ste-item";
-const ACTIVE_CLASS = "ste-item--active";
+const OVERLAY_ID = "ai-suggestions-overlay";
 
 let overlayEl: HTMLDivElement | null = null;
-let currentItems: AISuggestion[] = [];
-let activeIndex = 0;
-let selectCallback: SelectCallback | null = null;
-let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
-let clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+export interface OverlayData {
+  text: string;
+  suggestions: AISuggestion[];
+  analysis: TextAnalysis;
+  position: { x: number; y: number };
+}
 
-/**
- * Render the suggestion dropdown near the caret / active element.
- *
- * @param suggestions  Ranked list from matchSnippets + AI engine
- * @param anchor       The editable element the user is typing in
- * @param onSelect     Called with the chosen text when user picks a suggestion
- */
-export function showOverlay(
-  suggestions: AISuggestion[],
-  anchor: HTMLElement,
-  onSelect: SelectCallback
-): void {
-  if (suggestions.length === 0) return;
-
+export function showOverlay(data: OverlayData): void {
   hideOverlay();
-
-  currentItems = suggestions;
-  activeIndex = 0;
-  selectCallback = onSelect;
 
   injectStyles();
 
   overlayEl = document.createElement("div");
   overlayEl.id = OVERLAY_ID;
-  overlayEl.setAttribute("role", "listbox");
-  overlayEl.setAttribute("aria-label", "Text expansion suggestions");
+  overlayEl.className = "ai-overlay";
 
-  renderItems();
-  positionOverlay(anchor);
+  const html = `
+    <div class="ai-overlay-content">
+      <div class="ai-header">
+        <span class="ai-title">✨ Writing Suggestions</span>
+        <button class="ai-close" onclick="removeOverlay()">×</button>
+      </div>
+      
+      <div class="ai-analysis">
+        <div class="ai-metric">
+          <span>Grammar: <strong>${data.analysis.grammarScore}%</strong></span>
+          <div class="ai-bar" style="width: ${data.analysis.grammarScore}%"></div>
+        </div>
+        <div class="ai-metric">
+          <span>Clarity: <strong>${data.analysis.clarityScore}%</strong></span>
+          <div class="ai-bar" style="width: ${data.analysis.clarityScore}%"></div>
+        </div>
+      </div>
+
+      <div class="ai-suggestions">
+        ${data.suggestions
+          .slice(0, 3)
+          .map(
+            (sugg, i) => `
+          <div class="ai-suggestion" data-index="${i}">
+            <div class="ai-reason">${sugg.reason}</div>
+            <div class="ai-text">"${sugg.originalText}" → "${sugg.suggestion}"</div>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+
+      <div class="ai-footer">
+        <p class="ai-tone">Tone: <strong>${data.analysis.toneAnalysis}</strong></p>
+      </div>
+    </div>
+  `;
+
+  overlayEl.innerHTML = html;
+  overlayEl.style.position = "fixed";
+  overlayEl.style.left = data.position.x + "px";
+  overlayEl.style.top = data.position.y + "px";
+  overlayEl.style.zIndex = "999999";
 
   document.body.appendChild(overlayEl);
 
-  // Keyboard nav
-  keydownHandler = (e: KeyboardEvent) => handleKeydown(e);
-  document.addEventListener("keydown", keydownHandler, true);
-
-  // Click outside to dismiss
-  clickOutsideHandler = (e: MouseEvent) => {
-    if (overlayEl && !overlayEl.contains(e.target as Node)) {
+  // Add event listeners to suggestions
+  const suggestions = overlayEl.querySelectorAll(".ai-suggestion");
+  suggestions.forEach((el) => {
+    el.addEventListener("click", () => {
       hideOverlay();
-    }
-  };
-  setTimeout(() => {
-    document.addEventListener("mousedown", clickOutsideHandler!, true);
-  }, 0);
+    });
+  });
 }
 
-/**
- * Destroy the overlay and clean up all listeners.
- */
 export function hideOverlay(): void {
   if (overlayEl) {
     overlayEl.remove();
     overlayEl = null;
   }
-  if (keydownHandler) {
-    document.removeEventListener("keydown", keydownHandler, true);
-    keydownHandler = null;
-  }
-  if (clickOutsideHandler) {
-    document.removeEventListener("mousedown", clickOutsideHandler, true);
-    clickOutsideHandler = null;
-  }
-  currentItems = [];
-  selectCallback = null;
-  activeIndex = 0;
 }
-
-/**
- * Returns true if the overlay is currently visible.
- */
-export function isOverlayVisible(): boolean {
-  return overlayEl !== null;
-}
-
-// ─── Rendering ────────────────────────────────────────────────────────────────
-
-function renderItems(): void {
-  if (!overlayEl) return;
-  overlayEl.innerHTML = "";
-
-  currentItems.forEach((suggestion, index) => {
-    const item = document.createElement("div");
-    item.className = ITEM_CLASS + (index === activeIndex ? ` ${ACTIVE_CLASS}` : "");
-    item.setAttribute("role", "option");
-    item.setAttribute("aria-selected", String(index === activeIndex));
-    item.dataset.index = String(index);
-
-    // Source badge
-    const badge = document.createElement("span");
-    badge.className = "ste-badge ste-badge--" + suggestion.source;
-    badge.textContent = suggestion.source === "ai" ? "AI" : "snippet";
-
-    // Preview text (truncated)
-    const preview = document.createElement("span");
-    preview.className = "ste-preview";
-    preview.textContent = truncate(suggestion.text, 72);
-
-    // Confidence bar
-    const bar = document.createElement("span");
-    bar.className = "ste-bar";
-    bar.style.width = Math.round(suggestion.confidence * 100) + "%";
-
-    item.append(badge, preview, bar);
-
-    item.addEventListener("mousedown", (e) => {
-      e.preventDefault(); // prevent blur on anchor
-      commitSelection(index);
-    });
-
-    item.addEventListener("mousemove", () => {
-      if (activeIndex !== index) {
-        activeIndex = index;
-        refreshActive();
-      }
-    });
-
-    overlayEl!.appendChild(item);
-  });
-}
-
-function refreshActive(): void {
-  if (!overlayEl) return;
-  overlayEl.querySelectorAll("." + ITEM_CLASS).forEach((el, i) => {
-    el.classList.toggle(ACTIVE_CLASS, i === activeIndex);
-    el.setAttribute("aria-selected", String(i === activeIndex));
-  });
-}
-
-// ─── Positioning ──────────────────────────────────────────────────────────────
-
-function positionOverlay(anchor: HTMLElement): void {
-  if (!overlayEl) return;
-
-  const caretRect = getCaretRect(anchor);
-  const OFFSET = 6;
-
-  overlayEl.style.position = "fixed";
-  overlayEl.style.zIndex = "2147483647";
-
-  // Temporarily render off-screen to measure
-  overlayEl.style.visibility = "hidden";
-  overlayEl.style.top = "0";
-  overlayEl.style.left = "0";
-  document.body.appendChild(overlayEl);
-
-  const { width: ow, height: oh } = overlayEl.getBoundingClientRect();
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-
-  let top = caretRect.bottom + OFFSET;
-  let left = caretRect.left;
-
-  // Flip above caret if not enough room below
-  if (top + oh > vh - 8) top = caretRect.top - oh - OFFSET;
-  // Clamp horizontally
-  if (left + ow > vw - 8) left = vw - ow - 8;
-  if (left < 8) left = 8;
-
-  overlayEl.style.top = top + "px";
-  overlayEl.style.left = left + "px";
-  overlayEl.style.visibility = "visible";
-}
-
-/**
- * Get caret bounding rect from input/textarea or contenteditable.
- */
-function getCaretRect(anchor: HTMLElement): DOMRect {
-  // Try Selection API first (works in contenteditable + most browsers)
-  const sel = window.getSelection();
-  if (sel && sel.rangeCount > 0) {
-    const range = sel.getRangeAt(0).cloneRange();
-    range.collapse(true);
-    const rect = range.getBoundingClientRect();
-    if (rect.width > 0 || rect.height > 0) return rect;
-  }
-
-  // Fallback: use the anchor element's bounding rect
-  return anchor.getBoundingClientRect();
-}
-
-// ─── Keyboard navigation ──────────────────────────────────────────────────────
-
-function handleKeydown(e: KeyboardEvent): void {
-  if (!overlayEl) return;
-
-  switch (e.key) {
-    case "ArrowDown":
-      e.preventDefault();
-      activeIndex = (activeIndex + 1) % currentItems.length;
-      refreshActive();
-      break;
-
-    case "ArrowUp":
-      e.preventDefault();
-      activeIndex = (activeIndex - 1 + currentItems.length) % currentItems.length;
-      refreshActive();
-      break;
-
-    case "Enter":
-    case "Tab":
-      e.preventDefault();
-      commitSelection(activeIndex);
-      break;
-
-    case "Escape":
-      e.preventDefault();
-      hideOverlay();
-      break;
-  }
-}
-
-function commitSelection(index: number): void {
-  const item = currentItems[index];
-  if (!item || !selectCallback) return;
-  const cb = selectCallback;
-  hideOverlay();
-  cb(item.text);
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function truncate(str: string, max: number): string {
-  return str.length <= max ? str : str.slice(0, max - 1) + "…";
-}
-
-// ─── Styles (injected once into the page) ────────────────────────────────────
-
-let stylesInjected = false;
 
 function injectStyles(): void {
-  if (stylesInjected) return;
-  stylesInjected = true;
+  if (document.getElementById("ai-overlay-styles")) return;
 
   const style = document.createElement("style");
+  style.id = "ai-overlay-styles";
   style.textContent = `
-    #ste-overlay {
-      background: #ffffff;
-      border: 1px solid #e2e2e2;
-      border-radius: 10px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-      min-width: 260px;
-      max-width: 420px;
-      max-height: 260px;
-      overflow-y: auto;
-      padding: 4px;
+    #ai-suggestions-overlay {
+      background: white;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1f2937;
+      max-width: 400px;
+      padding: 0;
+      animation: slideUp 0.2s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .ai-overlay-content {
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .ai-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: linear-gradient(135deg, #7c3aed, #6366f1);
+      color: white;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .ai-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ai-close {
+      background: none;
+      border: none;
+      color: white;
+      cursor: pointer;
+      font-size: 20px;
+      padding: 0;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .ai-close:hover {
+      opacity: 0.8;
+    }
+
+    .ai-analysis {
+      padding: 12px 16px;
+      border-bottom: 1px solid #f3f4f6;
+      background: #f9fafb;
+    }
+
+    .ai-metric {
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .ai-metric:last-child {
+      margin-bottom: 0;
+    }
+
+    .ai-metric span {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+      color: #6b7280;
+    }
+
+    .ai-metric strong {
+      color: #1f2937;
+    }
+
+    .ai-bar {
+      height: 4px;
+      background: #dbeafe;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #7c3aed, #6366f1);
+    }
+
+    .ai-suggestions {
+      max-height: 240px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .ai-suggestion {
+      padding: 10px;
+      margin-bottom: 8px;
+      background: #f3f4f6;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
       font-size: 13px;
+      border-left: 3px solid #7c3aed;
+    }
+
+    .ai-suggestion:hover {
+      background: #e5e7eb;
+      transform: translateX(4px);
+    }
+
+    .ai-suggestion:last-child {
+      margin-bottom: 0;
+    }
+
+    .ai-reason {
+      font-size: 11px;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    .ai-text {
+      color: #374151;
+      font-weight: 500;
       line-height: 1.4;
     }
 
-    @media (prefers-color-scheme: dark) {
-      #ste-overlay {
-        background: #1e1e1e;
-        border-color: #3a3a3a;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-        color: #d4d4d4;
-      }
+    .ai-footer {
+      padding: 10px 16px;
+      border-top: 1px solid #f3f4f6;
+      background: #f9fafb;
+      font-size: 12px;
+      color: #6b7280;
     }
 
-    .ste-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 10px;
-      border-radius: 7px;
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
+    .ai-tone {
+      margin: 0;
     }
 
-    .ste-item--active {
-      background: #f0f0ff;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .ste-item--active { background: #2a2a40; }
-    }
-
-    .ste-badge {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 2px 5px;
-      border-radius: 4px;
-      flex-shrink: 0;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    .ste-badge--ai {
-      background: #ede9fe;
-      color: #5b21b6;
-    }
-
-    .ste-badge--snippet {
-      background: #d1fae5;
-      color: #065f46;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .ste-badge--ai    { background: #3b2f6e; color: #c4b5fd; }
-      .ste-badge--snippet { background: #064e3b; color: #6ee7b7; }
-    }
-
-    .ste-preview {
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      color: #111;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .ste-preview { color: #d4d4d4; }
-    }
-
-    .ste-bar {
-      display: block;
-      height: 2px;
-      background: #7c3aed;
-      border-radius: 1px;
-      position: absolute;
-      bottom: 3px;
-      left: 10px;
-      opacity: 0.3;
-      transition: width 0.2s;
+    .ai-tone strong {
+      color: #1f2937;
     }
   `;
+
   document.head.appendChild(style);
 }
+
+// Make hideOverlay globally accessible
+declare global {
+  function removeOverlay(): void;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).removeOverlay = hideOverlay;

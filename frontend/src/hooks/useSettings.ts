@@ -4,11 +4,13 @@ import type { Settings } from "../types";
 
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
-  aiEnabled: false,
+  aiEnabled: true,
   geminiApiKey: "",
-  minChars: 3,
-  maxSuggestions: 5,
-  keyboardShortcut: "Ctrl+Shift+Y",
+  model: "gemini",
+  analysisMode: "comprehensive",
+  autoSuggest: true,
+  suggestionDelay: 1000,
+  minTextLength: 10,
   excludedSites: [],
   cloudSyncEnabled: false,
   backendUrl: "http://localhost:4000",
@@ -18,10 +20,10 @@ const DEFAULT_SETTINGS: Settings = {
  * useSettings — reads and writes the extension Settings object.
  *
  * @example
- *   const { settings, updateSettings, resetSettings } = useSettings();
+ *   const { settings, updateSettings } = useSettings();
  */
 export function useSettings() {
-  const [settings, setSettings, loading] = useStorage<Settings>(
+  const [settings, setSettings] = useStorage<Settings>(
     "settings",
     DEFAULT_SETTINGS
   );
@@ -33,9 +35,5 @@ export function useSettings() {
     [settings, setSettings]
   );
 
-  const resetSettings = useCallback(async () => {
-    await setSettings(DEFAULT_SETTINGS);
-  }, [setSettings]);
-
-  return { settings, loading, updateSettings, resetSettings };
+  return { settings, updateSettings };
 }

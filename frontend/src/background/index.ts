@@ -1,200 +1,258 @@
-import type { MessageType, Settings, Snippet, AnalyticsEntry, User } from "../types";
-import { getGeminiSuggestions } from "./geminiEngine";
-import { syncToCloud, syncFromCloud } from "./cloudSync";
-import { recordPattern, getSuggestionPatterns, removePattern } from "./patternDetector";
-import { generateUniqueShortcut, suggestShortcuts } from "./shortcutGenerator";
+import type { Settings, WritingSession, AISuggestion, TextAnalysis, MessageType } from "../types";
+
+console.log("[Background Worker] Service worker starting...");
 
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
-  aiEnabled: false,
+  aiEnabled: true,
   geminiApiKey: "",
-  minChars: 3,
-  maxSuggestions: 5,
-  keyboardShortcut: "Ctrl+Shift+Y",
+  model: "gemini",
+  analysisMode: "comprehensive",
+  autoSuggest: true,
+  suggestionDelay: 1000,
+  minTextLength: 10,
   excludedSites: [],
   cloudSyncEnabled: false,
   backendUrl: "http://localhost:4000",
 };
 
-// ── Keyboard commands ─────────────────────────────────────────────────────────
+// Initialize chrome message listener
+try {
+  chrome.runtime.onMessage.addListener((message: MessageType, sender, sendResponse) => {
+    console.log("[Background Worker] 📨 Received message:", message.type, "from", sender?.url);
 
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command === "insert-snippet") {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return;
-    chrome.tabs.sendMessage(tab.id, { type: "OPEN_POPUP" });
-  }
+    if (message.type === "ANALYZE_TEXT") {
+      console.log("[Background Worker] 🔍 Analyzing text:", message.text?.substring(0, 50));
+      analyzeText(message.text)
+        .then((result) => {
+          console.log("[Background Worker] ✅ Analysis complete, sending response");
+          sendResponse(result);
+        })
+        .catch((err) => {
+          console.error("[Background Worker] ❌ Analysis failed:", err);
+          sendResponse({ error: err.message, suggestions: [], analysis: getDefaultAnalysis() });
+        });
+      return true;
+    }
 
-  if (command === "toggle-extension") {
-    const { settings: raw } = await chrome.storage.sync.get("settings");
-    const settings: Settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
-    const next = { ...settings, enabled: !settings.enabled };
-    await chrome.storage.sync.set({ settings: next });
+    if (message.type === "GET_SESSIONS") {
+      console.log("[Background Worker] 📋 GET_SESSIONS requested");
+      chrome.storage.local.get("sessions", ({ sessions }) => {
+        const sessionList = (sessions as WritingSession[]) ?? [];
+        console.log("[Background Worker] ✅ Returning", sessionList.length, "sessions");
+        sendResponse(sessionList);
+      });
+      return true;
+    }
 
-    // Show badge to confirm state
-    chrome.action.setBadgeText({ text: next.enabled ? "" : "OFF" });
-    chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
-  }
-});
+    if (message.type === "CREATE_SESSION") {
+      const session: WritingSession = {
+        id: crypto.randomUUID(),
+        siteUrl: message.siteUrl,
+        siteName: message.siteName,
+        startTime: Date.now(),
+        content: "",
+        suggestions: [],
+        appliedCount: 0,
+        textAnalysis: {
+          grammarScore: 75,
+          spellingErrors: 0,
+          clarityScore: 75,
+          toneAnalysis: "neutral",
+          suggestedImprovements: [],
+          readingLevel: "intermediate",
+        },
+      };
+      console.log("[Background Worker] 🆕 Creating session for:", message.siteName);
+      chrome.storage.local.get("sessions", ({ sessions = [] }) => {
+        const allSessions = (sessions as WritingSession[]) || [];
+        allSessions.push(session);
+        chrome.storage.local.set({ sessions: allSessions }, () => {
+          console.log("[Background Worker] ✅ Session created and stored. ID:", session.id);
+          sendResponse({ success: true, sessionId: session.id });
+        });
+      });
+      return true;
+    }
 
-// ── Messages from content script & popup ─────────────────────────────────────
+    if (message.type === "UPDATE_SETTINGS") {
+      console.log("[Background Worker] ⚙️ Updating settings");
+      chrome.storage.sync.set({ settings: message.settings }, () => {
+        console.log("[Background Worker] ✅ Settings updated");
+        sendResponse({ success: true });
+      });
+      return true;
+    }
 
-chrome.runtime.onMessage.addListener((msg: MessageType, _sender, reply) => {
-  if (msg.type === "GET_SUGGESTIONS") {
-    handleSuggestions(msg.prefix, msg.context).then(reply);
+    if (message.type === "GET_SETTINGS") {
+      console.log("[Background Worker] ⚙️ GET_SETTINGS requested");
+      chrome.storage.sync.get("settings", ({ settings }) => {
+        console.log("[Background Worker] ✅ Returning settings");
+        sendResponse(settings ?? DEFAULT_SETTINGS);
+      });
+      return true;
+    }
+
+    if (message.type === "CLEAR_HISTORY") {
+      console.log("[Background Worker] 🗑️ Clearing history");
+      chrome.storage.local.remove("sessions", () => {
+        console.log("[Background Worker] ✅ History cleared");
+        sendResponse({ success: true });
+      });
+      return true;
+    }
+
+    console.warn("[Background Worker] ⚠️ Unknown message type:", message.type);
+    sendResponse({ error: "Unknown message type" });
     return true;
-  }
+  });
+  
+  console.log("[Background Worker] ✅ Message listener registered successfully");
+} catch (err) {
+  console.error("[Background Worker] ❌ CRITICAL ERROR - Failed to register message listener:", err);
+}
 
-  if (msg.type === "RECORD_USAGE") {
-    handleRecordUsage(msg.snippetId, msg.site, msg.trigger).then(reply);
-    return true;
-  }
-
-  if (msg.type === "SYNC_TO_CLOUD") {
-    handleCloudSync().then(reply);
-    return true;
-  }
-
-  if (msg.type === "GET_SETTINGS") {
-    chrome.storage.sync.get("settings", (data) => {
-      reply({ settings: { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) } });
+async function getStorageSettings(): Promise<Settings> {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get("settings", ({ settings }) => {
+      resolve((settings as Settings) ?? DEFAULT_SETTINGS);
     });
-    return true;
-  }
+  });
+}
 
-  if (msg.type === "RECORD_TEXT") {
-    recordPattern(msg.text).then(() => reply({ success: true }));
-    return true;
-  }
+async function analyzeText(
+  text: string
+): Promise<{ suggestions: AISuggestion[]; analysis: TextAnalysis }> {
+  const settings = await getStorageSettings();
 
-  if (msg.type === "GET_PATTERNS") {
-    getSuggestionPatterns().then((patterns) => reply({ patterns }));
-    return true;
-  }
-
-  if (msg.type === "SUGGEST_SHORTCUT") {
-    suggestShortcuts(msg.text).then((shortcuts) => reply({ shortcuts }));
-    return true;
-  }
-
-  if (msg.type === "CREATE_SNIPPET_FROM_PATTERN") {
-    handleCreateFromPattern(msg.pattern).then(reply);
-    return true;
-  }
-});
-
-// ── Sync on startup ───────────────────────────────────────────────────────────
-
-chrome.runtime.onStartup.addListener(async () => {
-  const { settings: raw, user: rawUser } = await chrome.storage.sync.get(["settings", "user"]);
-  const settings: Settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
-  const user = rawUser as User | undefined;
-  if (settings.cloudSyncEnabled && user?.token) {
-    await syncFromCloud(settings, user.token);
-  }
-});
-
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
-async function handleSuggestions(prefix: string, context: string) {
-  const { settings: raw, snippets: rawSnippets } = await chrome.storage.sync.get([
-    "settings", "snippets",
-  ]);
-  const settings: Settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
-  const snippets: Snippet[] = (rawSnippets as Snippet[] | undefined) ?? [];
-
-  if (!settings.enabled || prefix.length < settings.minChars) {
-    return { suggestions: [] };
-  }
-
-  // 1. Exact shortcut match
-  const shortcutMatch = snippets.find(
-    (s) => s.shortcut.replace(/^\//, "") === prefix.replace(/^\//, "")
-  );
-  if (shortcutMatch) {
+  if (!settings.aiEnabled || !settings.geminiApiKey) {
     return {
-      suggestions: [{ text: shortcutMatch.content, confidence: 1, source: "history" }],
+      suggestions: [],
+      analysis: getDefaultAnalysis(),
     };
   }
 
-  // 2. Prefix match on label/shortcut
-  const prefixMatches = snippets
-    .filter(
-      (s) =>
-        s.label.toLowerCase().startsWith(prefix.toLowerCase()) ||
-        s.shortcut.toLowerCase().includes(prefix.toLowerCase()) ||
-        s.content.toLowerCase().startsWith(prefix.toLowerCase())
-    )
-    .sort((a, b) => b.usageCount - a.usageCount)
-    .slice(0, 3)
-    .map((s) => ({ text: s.content, snippetId: s.id, confidence: 0.85, source: "history" as const }));
-
-  // 3. Gemini AI fallback
-  let aiResults: { text: string; confidence: number; source: "ai" }[] = [];
-  if (prefixMatches.length < 2 && settings.aiEnabled && settings.geminiApiKey) {
-    aiResults = await getGeminiSuggestions(prefix, context, settings.geminiApiKey);
-  }
-
-  return { suggestions: [...prefixMatches, ...aiResults].slice(0, settings.maxSuggestions) };
-}
-
-async function handleRecordUsage(snippetId: string, site: string, trigger: string) {
-  // Update snippet usage count
-  const { snippets: raw } = await chrome.storage.sync.get("snippets");
-  const snippets: Snippet[] = (raw as Snippet[] | undefined) ?? [];
-  const updated = snippets.map((s) =>
-    s.id === snippetId
-      ? { ...s, usageCount: s.usageCount + 1, lastUsed: Date.now() }
-      : s
-  );
-  await chrome.storage.sync.set({ snippets: updated });
-
-  // Append to analytics log
-  const { analytics: rawA } = await chrome.storage.local.get("analytics");
-  const analytics: AnalyticsEntry[] = (rawA as AnalyticsEntry[] | undefined) ?? [];
-  const validTrigger = (trigger === "shortcut" || trigger === "keyboard" || trigger === "ai") ? trigger : "shortcut";
-  analytics.push({ snippetId, usedAt: Date.now(), site, trigger: validTrigger });
-  // Keep last 500 entries
-  await chrome.storage.local.set({ analytics: analytics.slice(-500) });
-}
-
-async function handleCloudSync() {
-  const { settings: raw, user: rawUser } = await chrome.storage.sync.get(["settings", "user"]);
-  const settings: Settings = { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
-  const user = rawUser as User | undefined;
-  if (!settings.cloudSyncEnabled || !user?.token) {
-    return { success: false, error: "Cloud sync not configured" };
-  }
-  return syncToCloud(settings, user.token);
-}
-
-async function handleCreateFromPattern(patternText: string) {
   try {
-    // Generate a snippet from detected pattern
-    const shortcut = await generateUniqueShortcut(patternText);
-    const newSnippet: Snippet = {
-      id: crypto.randomUUID(),
-      shortcut,
-      label: patternText.slice(0, 50),  // First 50 chars as label
-      content: patternText,
-      tags: ["auto-generated"],
-      usageCount: 0,
-      lastUsed: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+    const response = await callGeminiAPI(text, settings.analysisMode, settings.geminiApiKey);
+    return {
+      suggestions: response.suggestions || [],
+      analysis: response.analysis || getDefaultAnalysis(),
     };
-
-    // Add to snippets
-    const { snippets: raw } = await chrome.storage.sync.get("snippets");
-    const snippets: Snippet[] = (raw as Snippet[] | undefined) ?? [];
-    snippets.push(newSnippet);
-    await chrome.storage.sync.set({ snippets });
-
-    // Remove the pattern so it's not suggested again
-    await removePattern(patternText);
-
-    return { success: true, snippet: newSnippet };
   } catch (err) {
-    return { success: false, error: String(err) };
+    console.error("AI analysis failed:", err);
+    return {
+      suggestions: [],
+      analysis: getDefaultAnalysis(),
+    };
   }
+}
+
+function getDefaultAnalysis(): TextAnalysis {
+  return {
+    grammarScore: 75,
+    spellingErrors: 0,
+    clarityScore: 75,
+    toneAnalysis: "neutral",
+    suggestedImprovements: [],
+    readingLevel: "intermediate",
+  };
+}
+
+async function callGeminiAPI(
+  text: string,
+  analysisMode: string,
+  apiKey: string
+): Promise<{ suggestions: AISuggestion[]; analysis: TextAnalysis }> {
+  const prompts = {
+    grammar: "Check grammar and spelling. Provide corrections.",
+    comprehensive: `Analyze the text for:
+1. Grammar and spelling errors
+2. Clarity improvements
+3. Tone assessment
+4. Reading level
+
+Provide specific suggestions for each.`,
+    completion: "Suggest next words/sentences to complete the user's thought.",
+  };
+
+  const prompt = prompts[analysisMode as keyof typeof prompts] || prompts.grammar;
+
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + apiKey, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: `${prompt}\n\nText to analyze: "${text}"`,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 500,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  return {
+    suggestions: parseSuggestions(responseText),
+    analysis: parseAnalysis(responseText),
+  };
+}
+
+function parseSuggestions(aiResponse: string): AISuggestion[] {
+  const suggestions: AISuggestion[] = [];
+  const lines = aiResponse.split("\n");
+
+  let suggestionCount = 0;
+  for (const line of lines) {
+    if (
+      line.includes("should be") ||
+      line.includes("instead of") ||
+      line.includes("replace")
+    ) {
+      suggestionCount++;
+      if (suggestionCount > 5) break;
+
+      suggestions.push({
+        id: `sugg-${suggestionCount}`,
+        position: 0,
+        length: 0,
+        originalText: "text",
+        suggestion: line.trim(),
+        reason: "grammar",
+        confidence: 0.8,
+        applied: false,
+      });
+    }
+  }
+
+  return suggestions;
+}
+
+function parseAnalysis(aiResponse: string): TextAnalysis {
+  const hasGrammarErrors = /error|incorrect|wrong/.test(aiResponse.toLowerCase());
+  const hasSpellingIssues = /spell|typo/.test(aiResponse.toLowerCase());
+  const hasClarityIssues = /unclear|confus|improve clarity/.test(aiResponse.toLowerCase());
+
+  return {
+    grammarScore: hasGrammarErrors ? 50 : 85,
+    spellingErrors: hasSpellingIssues ? 1 : 0,
+    clarityScore: hasClarityIssues ? 60 : 80,
+    toneAnalysis: "formal",
+    suggestedImprovements: aiResponse.split("\n").slice(0, 3),
+    readingLevel: "intermediate",
+  };
 }
