@@ -51,6 +51,7 @@ export interface Settings {
 
 // Extended message types for AI writing assistant
 export type MessageType =
+  | { type: "PING" }
   | { type: "ANALYZE_TEXT"; text: string; context: string; siteUrl: string }
   | { type: "GET_SUGGESTIONS"; text: string }
   | { type: "APPLY_SUGGESTION"; suggestionId: string; sessionId: string }

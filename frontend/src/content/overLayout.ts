@@ -66,7 +66,6 @@ export function showOverlay(data: OverlayData): void {
 
   document.body.appendChild(overlayEl);
 
-  // Add event listeners to suggestions
   const suggestions = overlayEl.querySelectorAll(".ai-suggestion");
   suggestions.forEach((el) => {
     el.addEventListener("click", () => {
@@ -100,6 +99,86 @@ function injectStyles(): void {
       animation: slideUp 0.2s ease-out;
     }
 
+    .ai-overlay-content {
+      padding: 16px;
+    }
+
+    .ai-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .ai-title {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .ai-close {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: #6b7280;
+    }
+
+    .ai-analysis {
+      margin-bottom: 12px;
+    }
+
+    .ai-metric {
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .ai-bar {
+      height: 4px;
+      background: #e5e7eb;
+      border-radius: 2px;
+      margin-top: 4px;
+      background: linear-gradient(90deg, #10b981, #3b82f6);
+    }
+
+    .ai-suggestions {
+      margin-bottom: 12px;
+    }
+
+    .ai-suggestion {
+      padding: 8px;
+      background: #f9fafb;
+      border-radius: 4px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .ai-suggestion:hover {
+      background: #e5e7eb;
+    }
+
+    .ai-reason {
+      font-size: 11px;
+      color: #6b7280;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .ai-text {
+      font-size: 13px;
+      margin-top: 4px;
+      color: #1f2937;
+    }
+
+    .ai-footer {
+      font-size: 11px;
+      color: #6b7280;
+    }
+
+    .ai-tone {
+      margin: 0;
+    }
+
     @keyframes slideUp {
       from {
         opacity: 0;
@@ -110,146 +189,7 @@ function injectStyles(): void {
         transform: translateY(0);
       }
     }
-
-    .ai-overlay-content {
-      background: white;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .ai-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 16px;
-      background: linear-gradient(135deg, #7c3aed, #6366f1);
-      color: white;
-      font-weight: 600;
-      font-size: 14px;
-    }
-
-    .ai-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .ai-close {
-      background: none;
-      border: none;
-      color: white;
-      cursor: pointer;
-      font-size: 20px;
-      padding: 0;
-      width: 24px;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .ai-close:hover {
-      opacity: 0.8;
-    }
-
-    .ai-analysis {
-      padding: 12px 16px;
-      border-bottom: 1px solid #f3f4f6;
-      background: #f9fafb;
-    }
-
-    .ai-metric {
-      margin-bottom: 8px;
-      font-size: 12px;
-    }
-
-    .ai-metric:last-child {
-      margin-bottom: 0;
-    }
-
-    .ai-metric span {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 4px;
-      color: #6b7280;
-    }
-
-    .ai-metric strong {
-      color: #1f2937;
-    }
-
-    .ai-bar {
-      height: 4px;
-      background: #dbeafe;
-      border-radius: 2px;
-      background: linear-gradient(90deg, #7c3aed, #6366f1);
-    }
-
-    .ai-suggestions {
-      max-height: 240px;
-      overflow-y: auto;
-      padding: 8px;
-    }
-
-    .ai-suggestion {
-      padding: 10px;
-      margin-bottom: 8px;
-      background: #f3f4f6;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-size: 13px;
-      border-left: 3px solid #7c3aed;
-    }
-
-    .ai-suggestion:hover {
-      background: #e5e7eb;
-      transform: translateX(4px);
-    }
-
-    .ai-suggestion:last-child {
-      margin-bottom: 0;
-    }
-
-    .ai-reason {
-      font-size: 11px;
-      color: #9ca3af;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-      font-weight: 600;
-    }
-
-    .ai-text {
-      color: #374151;
-      font-weight: 500;
-      line-height: 1.4;
-    }
-
-    .ai-footer {
-      padding: 10px 16px;
-      border-top: 1px solid #f3f4f6;
-      background: #f9fafb;
-      font-size: 12px;
-      color: #6b7280;
-    }
-
-    .ai-tone {
-      margin: 0;
-    }
-
-    .ai-tone strong {
-      color: #1f2937;
-    }
   `;
 
   document.head.appendChild(style);
 }
-
-// Make hideOverlay globally accessible
-declare global {
-  function removeOverlay(): void;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).removeOverlay = hideOverlay;

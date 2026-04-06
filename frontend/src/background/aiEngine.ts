@@ -1,39 +1,111 @@
-import type { AISuggestion } from "../types";
+import type { AISuggestion, TextAnalysis } from "../types";
 
-export async function getAISuggestions(
-  prefix: string,
-  context: string,
+export async function callGeminiAPI(
+  text: string,
+  analysisMode: string,
   apiKey: string
-): Promise<AISuggestion[]> {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+): Promise<{ suggestions: AISuggestion[]; analysis: TextAnalysis }> {
+  const prompts = {
+    grammar: "Check grammar and spelling. Provide corrections.",
+    comprehensive: `Analyze the text for:
+1. Grammar and spelling errors
+2. Clarity improvements
+3. Tone assessment
+4. Reading level
+
+Provide specific suggestions for each.`,
+    completion: "Suggest next words/sentences to complete the user's thought.",
+  };
+
+  const prompt = prompts[analysisMode as keyof typeof prompts] || prompts.grammar;
+
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + apiKey, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: `${prompt}\n\nText to analyze: "${text}"`,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 500,
       },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 200,
-        system: `You are an autocomplete engine. Given the user's partial text, 
-suggest up to 3 natural completions. Context: ${context}.
-Reply ONLY with a JSON array, no markdown:
-[{"full": "complete phrase", "score": 0.9}, ...]`,
-        messages: [{ role: "user", content: `Complete this: "${prefix}"` }],
-      }),
-    });
+    }),
+  });
 
-    const data = await res.json();
-    const raw = JSON.parse(data.content[0].text);
-
-    return raw.map((item: { full: string; score: number }) => ({
-      text: item.full.startsWith(prefix) ? item.full.slice(prefix.length) : item.full,
-      full: item.full,
-      score: item.score * 0.8, // slightly lower than history matches
-      source: "ai" as const,
-    }));
-  } catch {
-    return [];
+  if (!response.ok) {
+    throw new Error(`Gemini API error: ${response.statusText}`);
   }
+
+  const data = await response.json();
+  const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  return {
+    suggestions: parseSuggestions(responseText),
+    analysis: parseAnalysis(responseText),
+  };
+}
+
+export function parseSuggestions(aiResponse: string): AISuggestion[] {
+  const suggestions: AISuggestion[] = [];
+  const lines = aiResponse.split("\n");
+
+  let suggestionCount = 0;
+  for (const line of lines) {
+    if (
+      line.includes("should be") ||
+      line.includes("instead of") ||
+      line.includes("replace")
+    ) {
+      suggestionCount++;
+      if (suggestionCount > 5) break;
+
+      suggestions.push({
+        id: `sugg-${suggestionCount}`,
+        position: 0,
+        length: 0,
+        originalText: "text",
+        suggestion: line.trim(),
+        reason: "grammar",
+        confidence: 0.8,
+        applied: false,
+      });
+    }
+  }
+
+  return suggestions;
+}
+
+export function parseAnalysis(aiResponse: string): TextAnalysis {
+  const hasGrammarErrors = /error|incorrect|wrong/.test(aiResponse.toLowerCase());
+  const hasSpellingIssues = /spell|typo/.test(aiResponse.toLowerCase());
+  const hasClarityIssues = /unclear|confus|improve clarity/.test(aiResponse.toLowerCase());
+
+  return {
+    grammarScore: hasGrammarErrors ? 50 : 85,
+    spellingErrors: hasSpellingIssues ? 1 : 0,
+    clarityScore: hasClarityIssues ? 60 : 80,
+    toneAnalysis: "formal",
+    suggestedImprovements: aiResponse.split("\n").slice(0, 3),
+    readingLevel: "intermediate",
+  };
+}
+
+export function getDefaultAnalysis(): TextAnalysis {
+  return {
+    grammarScore: 75,
+    spellingErrors: 0,
+    clarityScore: 75,
+    toneAnalysis: "neutral",
+    suggestedImprovements: [],
+    readingLevel: "intermediate",
+  };
 }

@@ -1,6 +1,21 @@
-import type { Settings, WritingSession, AISuggestion, TextAnalysis, MessageType } from "../types";
+import type { Settings, WritingSession, MessageType } from "../types";
+import { callGeminiAPI, getDefaultAnalysis } from "./aiEngine";
 
 console.log("[Background Worker] Service worker starting...");
+
+// In-memory session cache for fast responses
+const sessionsCache: WritingSession[] = [];
+
+// Load sessions from storage on startup
+console.log("[Background Worker] Loading sessions from storage on startup...");
+chrome.storage.local.get("sessions", ({ sessions }) => {
+  if (sessions && Array.isArray(sessions)) {
+    sessionsCache.push(...(sessions as WritingSession[]));
+    console.log("[Background Worker] ✅ Loaded", sessionsCache.length, "sessions from storage");
+  } else {
+    console.log("[Background Worker] 📭 No sessions in storage yet");
+  }
+});
 
 const DEFAULT_SETTINGS: Settings = {
   enabled: true,
@@ -18,34 +33,46 @@ const DEFAULT_SETTINGS: Settings = {
 
 // Initialize chrome message listener
 try {
+  console.log("[Background Worker] 📋 Registering onMessage listener...");
+  
   chrome.runtime.onMessage.addListener((message: MessageType, sender, sendResponse) => {
-    console.log("[Background Worker] 📨 Received message:", message.type, "from", sender?.url);
+    console.log("[Background Worker] 📨 MESSAGE RECEIVED:", {
+      type: message.type,
+      from: sender?.url,
+      timestamp: new Date().toISOString(),
+    });
+
+    // PING - simple connectivity test
+    if (message.type === "PING") {
+      console.log("[Background Worker] 🏓 PING received, responding...");
+      sendResponse({ pong: true, timestamp: Date.now() });
+      return true;
+    }
 
     if (message.type === "ANALYZE_TEXT") {
       console.log("[Background Worker] 🔍 Analyzing text:", message.text?.substring(0, 50));
       analyzeText(message.text)
         .then((result) => {
-          console.log("[Background Worker] ✅ Analysis complete, sending response");
+          console.log("[Background Worker] ✅ Analysis complete, sending response with", result.suggestions.length, "suggestions");
           sendResponse(result);
         })
         .catch((err) => {
           console.error("[Background Worker] ❌ Analysis failed:", err);
-          sendResponse({ error: err.message, suggestions: [], analysis: getDefaultAnalysis() });
+          const defaultAnalysis = getDefaultAnalysis();
+          sendResponse({ error: err.message, suggestions: [], analysis: defaultAnalysis });
         });
       return true;
     }
 
     if (message.type === "GET_SESSIONS") {
-      console.log("[Background Worker] 📋 GET_SESSIONS requested");
-      chrome.storage.local.get("sessions", ({ sessions }) => {
-        const sessionList = (sessions as WritingSession[]) ?? [];
-        console.log("[Background Worker] ✅ Returning", sessionList.length, "sessions");
-        sendResponse(sessionList);
-      });
+      console.log("[Background Worker] 📋 GET_SESSIONS - returning", sessionsCache.length, "sessions");
+      sendResponse(sessionsCache);
       return true;
     }
 
     if (message.type === "CREATE_SESSION") {
+      console.log("[Background Worker] 🆕 CREATE_SESSION for:", message.siteName);
+      
       const session: WritingSession = {
         id: crypto.randomUUID(),
         siteUrl: message.siteUrl,
@@ -63,15 +90,26 @@ try {
           readingLevel: "intermediate",
         },
       };
-      console.log("[Background Worker] 🆕 Creating session for:", message.siteName);
-      chrome.storage.local.get("sessions", ({ sessions = [] }) => {
-        const allSessions = (sessions as WritingSession[]) || [];
-        allSessions.push(session);
-        chrome.storage.local.set({ sessions: allSessions }, () => {
-          console.log("[Background Worker] ✅ Session created and stored. ID:", session.id);
-          sendResponse({ success: true, sessionId: session.id });
-        });
+      
+      console.log("[Background Worker] 📝 Session created:", session.id);
+      
+      // Add to cache immediately
+      sessionsCache.push(session);
+      console.log("[Background Worker] 💾 Added to cache. Total sessions:", sessionsCache.length);
+      
+      // Respond immediately (don't wait for storage)
+      console.log("[Background Worker] ✅ SENDING RESPONSE NOW");
+      sendResponse({ success: true, sessionId: session.id });
+      
+      // Persist to storage in background (fire and forget)
+      chrome.storage.local.set({ sessions: sessionsCache }, () => {
+        if (chrome.runtime.lastError) {
+          console.error("[Background Worker] ❌ Storage save failed:", chrome.runtime.lastError);
+          return;
+        }
+        console.log("[Background Worker] ✅ Persisted to storage successfully");
       });
+      
       return true;
     }
 
@@ -95,6 +133,7 @@ try {
 
     if (message.type === "CLEAR_HISTORY") {
       console.log("[Background Worker] 🗑️ Clearing history");
+      sessionsCache.length = 0;
       chrome.storage.local.remove("sessions", () => {
         console.log("[Background Worker] ✅ History cleared");
         sendResponse({ success: true });
@@ -122,7 +161,7 @@ async function getStorageSettings(): Promise<Settings> {
 
 async function analyzeText(
   text: string
-): Promise<{ suggestions: AISuggestion[]; analysis: TextAnalysis }> {
+): Promise<{ suggestions: any[]; analysis: any }> {
   const settings = await getStorageSettings();
 
   if (!settings.aiEnabled || !settings.geminiApiKey) {
@@ -145,114 +184,4 @@ async function analyzeText(
       analysis: getDefaultAnalysis(),
     };
   }
-}
-
-function getDefaultAnalysis(): TextAnalysis {
-  return {
-    grammarScore: 75,
-    spellingErrors: 0,
-    clarityScore: 75,
-    toneAnalysis: "neutral",
-    suggestedImprovements: [],
-    readingLevel: "intermediate",
-  };
-}
-
-async function callGeminiAPI(
-  text: string,
-  analysisMode: string,
-  apiKey: string
-): Promise<{ suggestions: AISuggestion[]; analysis: TextAnalysis }> {
-  const prompts = {
-    grammar: "Check grammar and spelling. Provide corrections.",
-    comprehensive: `Analyze the text for:
-1. Grammar and spelling errors
-2. Clarity improvements
-3. Tone assessment
-4. Reading level
-
-Provide specific suggestions for each.`,
-    completion: "Suggest next words/sentences to complete the user's thought.",
-  };
-
-  const prompt = prompts[analysisMode as keyof typeof prompts] || prompts.grammar;
-
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + apiKey, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: `${prompt}\n\nText to analyze: "${text}"`,
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 500,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-  return {
-    suggestions: parseSuggestions(responseText),
-    analysis: parseAnalysis(responseText),
-  };
-}
-
-function parseSuggestions(aiResponse: string): AISuggestion[] {
-  const suggestions: AISuggestion[] = [];
-  const lines = aiResponse.split("\n");
-
-  let suggestionCount = 0;
-  for (const line of lines) {
-    if (
-      line.includes("should be") ||
-      line.includes("instead of") ||
-      line.includes("replace")
-    ) {
-      suggestionCount++;
-      if (suggestionCount > 5) break;
-
-      suggestions.push({
-        id: `sugg-${suggestionCount}`,
-        position: 0,
-        length: 0,
-        originalText: "text",
-        suggestion: line.trim(),
-        reason: "grammar",
-        confidence: 0.8,
-        applied: false,
-      });
-    }
-  }
-
-  return suggestions;
-}
-
-function parseAnalysis(aiResponse: string): TextAnalysis {
-  const hasGrammarErrors = /error|incorrect|wrong/.test(aiResponse.toLowerCase());
-  const hasSpellingIssues = /spell|typo/.test(aiResponse.toLowerCase());
-  const hasClarityIssues = /unclear|confus|improve clarity/.test(aiResponse.toLowerCase());
-
-  return {
-    grammarScore: hasGrammarErrors ? 50 : 85,
-    spellingErrors: hasSpellingIssues ? 1 : 0,
-    clarityScore: hasClarityIssues ? 60 : 80,
-    toneAnalysis: "formal",
-    suggestedImprovements: aiResponse.split("\n").slice(0, 3),
-    readingLevel: "intermediate",
-  };
 }

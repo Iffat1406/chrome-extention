@@ -1,5 +1,4 @@
-import { useCallback } from "react";
-import { useStorage } from "./useStorage";
+import { useState, useEffect } from "react";
 import type { Settings } from "../types";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -16,24 +15,25 @@ const DEFAULT_SETTINGS: Settings = {
   backendUrl: "http://localhost:4000",
 };
 
-/**
- * useSettings — reads and writes the extension Settings object.
- *
- * @example
- *   const { settings, updateSettings } = useSettings();
- */
 export function useSettings() {
-  const [settings, setSettings] = useStorage<Settings>(
-    "settings",
-    DEFAULT_SETTINGS
-  );
+  const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const updateSettings = useCallback(
-    async (patch: Partial<Settings>) => {
-      await setSettings({ ...settings, ...patch });
-    },
-    [settings, setSettings]
-  );
+  useEffect(() => {
+    // Load settings from chrome storage
+    chrome.storage.sync.get("settings", ({ settings: storedSettings }) => {
+      if (storedSettings) {
+        setSettingsState(storedSettings as Settings);
+      }
+      setIsLoading(false);
+    });
+  }, []);
 
-  return { settings, updateSettings };
+  const updateSettings = (newSettings: Partial<Settings>) => {
+    const updated = { ...settings, ...newSettings };
+    setSettingsState(updated);
+    chrome.storage.sync.set({ settings: updated });
+  };
+
+  return { settings, updateSettings, isLoading };
 }
