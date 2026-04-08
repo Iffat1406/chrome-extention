@@ -6,6 +6,8 @@ export interface WritingSession {
   startTime: number;
   endTime?: number;
   content: string;           // Full text written
+  context?: string;          // Type of writing (email, comment, reply, etc)
+  replyContext?: string;     // The message or post this draft is replying to
   suggestions: AISuggestion[]; // AI suggestions made
   appliedCount: number;       // How many suggestions user accepted
   textAnalysis: TextAnalysis; // Grammar, tone, clarity scores
@@ -52,7 +54,22 @@ export interface Settings {
 // Extended message types for AI writing assistant
 export type MessageType =
   | { type: "PING" }
-  | { type: "ANALYZE_TEXT"; text: string; context: string; siteUrl: string }
+  | { type: "CONTENT_SCRIPT_READY"; url: string; title: string; frameUrl?: string }
+  | {
+      type: "ANALYZE_TEXT";
+      text: string;
+      sessionId: string;
+      context: string;
+      siteUrl: string;
+      replyContext?: string;
+    }
+  | {
+      type: "UPDATE_SESSION_DRAFT";
+      sessionId: string;
+      text: string;
+      context?: string;
+      replyContext?: string;
+    }
   | { type: "GET_SUGGESTIONS"; text: string }
   | { type: "APPLY_SUGGESTION"; suggestionId: string; sessionId: string }
   | { type: "CREATE_SESSION"; siteUrl: string; siteName: string }

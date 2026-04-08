@@ -1,10 +1,18 @@
 import type { Settings, WritingSession, MessageType } from "../types";
-import { callGeminiAPI, getDefaultAnalysis } from "./aiEngine";
+import {
+  callGeminiAPI,
+  getDefaultAnalysis,
+  detectReplyContext,
+  sanitizeReplyContext,
+} from "./aiEngine";
 
 console.log("[Background Worker] Service worker starting...");
 
 // In-memory session cache for fast responses
 const sessionsCache: WritingSession[] = [];
+
+// Track last analysis text to reduce unnecessary API calls
+const lastAnalyzedText: Map<string, { text: string; timestamp: number }> = new Map();
 
 // Load sessions from storage on startup
 console.log("[Background Worker] Loading sessions from storage on startup...");
@@ -49,9 +57,25 @@ try {
       return true;
     }
 
+    if (message.type === "CONTENT_SCRIPT_READY") {
+      console.log("[Background Worker] Content script ready:", {
+        url: message.url,
+        title: message.title,
+        frameUrl: message.frameUrl,
+      });
+      sendResponse({ success: true });
+      return true;
+    }
+
     if (message.type === "ANALYZE_TEXT") {
       console.log("[Background Worker] 🔍 Analyzing text:", message.text?.substring(0, 50));
-      analyzeText(message.text)
+      // ✅ Pass sessionId and context to analyzeText
+      analyzeText(
+        message.text,
+        message.sessionId,
+        message.context,
+        message.replyContext
+      )
         .then((result) => {
           console.log("[Background Worker] ✅ Analysis complete, sending response with", result.suggestions.length, "suggestions");
           sendResponse(result);
@@ -61,6 +85,17 @@ try {
           const defaultAnalysis = getDefaultAnalysis();
           sendResponse({ error: err.message, suggestions: [], analysis: defaultAnalysis });
         });
+      return true;
+    }
+
+    if (message.type === "UPDATE_SESSION_DRAFT") {
+      storeSessionContent(
+        message.sessionId,
+        message.text,
+        message.context,
+        message.replyContext
+      );
+      sendResponse({ success: true });
       return true;
     }
 
@@ -79,6 +114,7 @@ try {
         siteName: message.siteName,
         startTime: Date.now(),
         content: "",
+        replyContext: undefined,
         suggestions: [],
         appliedCount: 0,
         textAnalysis: {
@@ -159,12 +195,109 @@ async function getStorageSettings(): Promise<Settings> {
   });
 }
 
+// ✅ NEW: Store session content immediately (before AI call)
+function storeSessionContent(
+  sessionId: string,
+  content: string,
+  context?: string,
+  replyContext?: string
+): void {
+  const session = sessionsCache.find(s => s.id === sessionId);
+  if (!session) {
+    console.warn("[Background Worker] ⚠️ Session not found:", sessionId);
+    return;
+  }
+
+  // Update in-memory cache
+  session.content = content;
+  if (context) {
+    session.context = context;
+  }
+  session.replyContext = sanitizeReplyContext(replyContext);
+
+  // Persist immediately to storage
+  chrome.storage.local.set({ sessions: sessionsCache }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("[Background Worker] ❌ Storage save failed:", chrome.runtime.lastError);
+      return;
+    }
+    console.log("[Background Worker] ✅ Session content stored immediately");
+  });
+}
+
+// ✅ NEW: Update session after AI analysis
+function updateSessionAnalysis(
+  sessionId: string,
+  suggestions: any[],
+  analysis: any
+): void {
+  const session = sessionsCache.find(s => s.id === sessionId);
+  if (!session) {
+    console.warn("[Background Worker] ⚠️ Session not found for analysis update:", sessionId);
+    return;
+  }
+
+  session.suggestions = suggestions || [];
+  session.textAnalysis = analysis;
+
+  chrome.storage.local.set({ sessions: sessionsCache }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("[Background Worker] ❌ Storage update failed:", chrome.runtime.lastError);
+      return;
+    }
+    console.log("[Background Worker] ✅ Session analysis stored after AI response");
+  });
+}
+
+// ✅ NEW: Check if text changed significantly (reduce API calls)
+function shouldAnalyzeText(sessionId: string, text: string): boolean {
+  const lastAnalysis = lastAnalyzedText.get(sessionId);
+  const now = Date.now();
+
+  // Always analyze if never analyzed before
+  if (!lastAnalysis) {
+    return true;
+  }
+
+  // Don't re-analyze same text within 2 seconds
+  if (lastAnalysis.text === text && now - lastAnalysis.timestamp < 2000) {
+    console.log("[Background Worker] ⏭️ Skipping analysis - text unchanged");
+    return false;
+  }
+
+  // Analyze if significant change (10+ characters added/removed)
+  const textDifference = Math.abs(text.length - lastAnalysis.text.length);
+  if (textDifference < 10 && now - lastAnalysis.timestamp < 3000) {
+    console.log("[Background Worker] ⏭️ Skipping analysis - minimal text change");
+    return false;
+  }
+
+  return true;
+}
+
 async function analyzeText(
-  text: string
+  text: string,
+  sessionId: string,
+  context?: string,
+  replyContext?: string
 ): Promise<{ suggestions: any[]; analysis: any }> {
   const settings = await getStorageSettings();
 
+  // ✅ STORE TEXT IMMEDIATELY - even if AI doesn't run
+  console.log("[Background Worker] 💾 Storing text immediately (before AI call)");
+  storeSessionContent(sessionId, text, context, replyContext);
+
   if (!settings.aiEnabled || !settings.geminiApiKey) {
+    console.log("[Background Worker] ℹ️ AI disabled, returning default analysis");
+    return {
+      suggestions: [],
+      analysis: getDefaultAnalysis(),
+    };
+  }
+
+  // ✅ Check if we should analyze (reduce API calls)
+  if (!shouldAnalyzeText(sessionId, text)) {
+    console.log("[Background Worker] ⏭️ Skipping AI call - text not significantly changed");
     return {
       suggestions: [],
       analysis: getDefaultAnalysis(),
@@ -172,13 +305,32 @@ async function analyzeText(
   }
 
   try {
-    const response = await callGeminiAPI(text, settings.analysisMode, settings.geminiApiKey);
+    // Detect reply context from the text
+    const effectiveReplyContext =
+      sanitizeReplyContext(replyContext) ?? detectReplyContext(text);
+    
+    console.log("[Background Worker] 🚀 Calling Gemini API with context detection...");
+    const response = await callGeminiAPI(
+      text,
+      settings.analysisMode,
+      settings.geminiApiKey,
+      context,
+      effectiveReplyContext
+    );
+
+    // Track this analysis
+    lastAnalyzedText.set(sessionId, { text, timestamp: Date.now() });
+
+    // ✅ STORE SUGGESTIONS AFTER AI RESPONSE
+    console.log("[Background Worker] 💾 Storing AI suggestions (after AI response)");
+    updateSessionAnalysis(sessionId, response.suggestions, response.analysis);
+
     return {
       suggestions: response.suggestions || [],
       analysis: response.analysis || getDefaultAnalysis(),
     };
   } catch (err) {
-    console.error("AI analysis failed:", err);
+    console.error("[Background Worker] ❌ AI analysis failed:", err);
     return {
       suggestions: [],
       analysis: getDefaultAnalysis(),

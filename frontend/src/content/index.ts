@@ -4,170 +4,301 @@ import type { WritingSession } from "../types";
 
 console.log("[AI Writing Assistant] Content script loaded on:", window.location.hostname);
 
-// Initialize trigger detector
 void new TriggerDetector();
 let currentSession: WritingSession | null = null;
 let analysisTimeout: number | null = null;
+let activeEditor: EditableElement | null = null;
+let pendingDraftSync = false;
 
-// Helper to safely send messages with error handling and timeout
+type EditableElement = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+
 function sendMessageSafe(message: unknown, callback: (response: any) => void, timeoutMs = 5000): void {
-  console.log("[AI Writing Assistant] 📨 Preparing to send message:", (message as any).type);
-  
+  console.log("[AI Writing Assistant] Preparing to send message:", (message as any).type);
+
   let timeoutId: number | null = null;
-  let responsedAlready = false;
+  let respondedAlready = false;
 
   const wrappedCallback = (response: any) => {
-    if (responsedAlready) {
-      console.log("[AI Writing Assistant] ⚠️ Callback fired but already responded");
+    if (respondedAlready) {
       return;
     }
-    responsedAlready = true;
-    
+    respondedAlready = true;
+
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
-    
-    console.log("[AI Writing Assistant] ✅ Callback received for:", (message as any).type, "Response:", response);
+
     callback(response);
   };
 
   timeoutId = window.setTimeout(() => {
-    if (!responsedAlready) {
-      responsedAlready = true;
-      console.error("[AI Writing Assistant] ❌ TIMEOUT: No response from background worker after", timeoutMs, "ms");
+    if (!respondedAlready) {
+      respondedAlready = true;
+      console.error("[AI Writing Assistant] Background worker timeout for", (message as any).type);
       callback(null);
     }
   }, timeoutMs);
 
-  console.log("[AI Writing Assistant] 🚀 Sending message to background worker...");
-  
   try {
     chrome.runtime.sendMessage(message, wrappedCallback);
   } catch (err: any) {
     if (timeoutId) clearTimeout(timeoutId);
-    responsedAlready = true;
-    const errorMsg = String(err?.message || err);
-    console.error("[AI Writing Assistant] ❌ sendMessage failed:", errorMsg);
+    respondedAlready = true;
+    console.error("[AI Writing Assistant] sendMessage failed:", String(err?.message || err));
     callback(null);
   }
 }
 
-// Initialize writing session when extension loads
 function initializeSession(): void {
   const hostname = window.location.hostname;
   const siteName = hostname.replace(/^www\./, "").split(".")[0];
 
-  console.log("[AI Writing Assistant] 🔄 initializeSession called for:", siteName);
-
   if (currentSession) {
-    console.log("[AI Writing Assistant] ℹ️ Session already exists, skipping initialization");
     return;
   }
-
-  console.log("[AI Writing Assistant] 📤 Sending CREATE_SESSION message...");
 
   sendMessageSafe(
     {
       type: "CREATE_SESSION",
       siteUrl: window.location.href,
-      siteName: siteName,
+      siteName,
     },
     (response) => {
-      if (!response) {
-        console.error("[AI Writing Assistant] ❌ No response from CREATE_SESSION");
+      if (!response?.success || !response.sessionId) {
+        console.error("[AI Writing Assistant] CREATE_SESSION failed:", response);
         return;
       }
 
-      console.log("[AI Writing Assistant] 📥 CREATE_SESSION response:", response);
+      currentSession = {
+        id: response.sessionId,
+        siteUrl: window.location.href,
+        siteName,
+        startTime: Date.now(),
+        endTime: undefined,
+        content: "",
+        context: undefined,
+        replyContext: undefined,
+        suggestions: [],
+        appliedCount: 0,
+        textAnalysis: {
+          grammarScore: 0,
+          spellingErrors: 0,
+          clarityScore: 0,
+          toneAnalysis: "neutral",
+          suggestedImprovements: [],
+          readingLevel: "intermediate",
+        },
+      };
 
-      if (response.success && response.sessionId) {
-        const session: WritingSession = {
-          id: response.sessionId,
-          siteUrl: window.location.href,
-          siteName: siteName,
-          startTime: Date.now(),
-          endTime: undefined,
-          content: "",
-          suggestions: [],
-          appliedCount: 0,
-          textAnalysis: {
-            grammarScore: 0,
-            spellingErrors: 0,
-            clarityScore: 0,
-            toneAnalysis: "neutral",
-            suggestedImprovements: [],
-            readingLevel: "intermediate",
-          },
-        };
-        currentSession = session;
-        console.log("[AI Writing Assistant] ✅ Session initialized successfully");
-      } else {
-        console.error("[AI Writing Assistant] ❌ Invalid response:", response);
+      if (pendingDraftSync && activeEditor) {
+        pendingDraftSync = false;
+        handleEditorChange(activeEditor);
       }
     }
   );
 }
 
-// Test PING connectivity
 function testBackgroundWorker(): void {
-  console.log("[AI Writing Assistant] 🔍 Testing background worker connectivity...");
-  
-  chrome.runtime.sendMessage(
-    { type: "PING" },
-    (response) => {
-      if (chrome.runtime.lastError) {
-        console.error("[AI Writing Assistant] ❌ PING failed:", chrome.runtime.lastError);
-        return;
-      }
-      if (response) {
-        console.log("[AI Writing Assistant] ✅ PING successful:", response);
-      }
+  chrome.runtime.sendMessage({ type: "PING" }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error("[AI Writing Assistant] PING failed:", chrome.runtime.lastError);
+      return;
     }
+
+    if (response) {
+      console.log("[AI Writing Assistant] PING successful");
+    }
+  });
+}
+
+function announceContentScriptReady(): void {
+  sendMessageSafe(
+    {
+      type: "CONTENT_SCRIPT_READY",
+      url: window.location.href,
+      title: document.title,
+      frameUrl: window.location.href,
+    },
+    () => {}
   );
 }
 
-console.log("[AI Writing Assistant] 🚀 Page loaded, testing connectivity...");
-testBackgroundWorker();
-
-setTimeout(() => {
-  initializeSession();
-}, 500);
-
-window.addEventListener("load", initializeSession);
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && !currentSession) {
-    console.log("[AI Writing Assistant] 📄 Page became visible, reinitializing...");
-    initializeSession();
+function getEditableElement(target: EventTarget | null): EditableElement | null {
+  if (!(target instanceof HTMLElement)) {
+    return null;
   }
-});
 
-// Listen for text input
-document.addEventListener("keyup", (e: any) => {
-  const target = e.target as any;
-  
-  const isEditable =
-    target.isContentEditable ||
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.closest('[contenteditable="true"]') !== null;
-
-  if (!isEditable) {
-    return;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    return target;
   }
-  
+
+  if (target.isContentEditable) {
+    return target;
+  }
+
+  const contentEditableHost = target.closest('[contenteditable="true"], [role="textbox"]');
+  return contentEditableHost instanceof HTMLElement ? contentEditableHost : null;
+}
+
+function getEventEditableTarget(event: Event): EditableElement | null {
+  const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+
+  for (const pathTarget of path) {
+    const editable = getEditableElement(pathTarget);
+    if (editable) {
+      return editable;
+    }
+  }
+
+  return getEditableElement(event.target);
+}
+
+function findLikelyEditable(): EditableElement | null {
+  const active = getEditableElement(document.activeElement);
+  if (active) {
+    return active;
+  }
+
+  const selectors = [
+    '[contenteditable="true"]',
+    '[role="textbox"]',
+    'textarea',
+    'input[type="text"]',
+    'input:not([type])',
+    '[data-lexical-editor="true"]',
+    '.ProseMirror',
+  ];
+
+  for (const selector of selectors) {
+    const element = document.querySelector(selector);
+    const editable = getEditableElement(element);
+    if (editable) {
+      return editable;
+    }
+  }
+
+  return null;
+}
+
+function readEditorText(element: EditableElement): string {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    return element.value;
+  }
+
+  return element.innerText || element.textContent || "";
+}
+
+function detectContextType(element: EditableElement): string {
+  const lowerHint = [
+    element.getAttribute("aria-label"),
+    element.getAttribute("placeholder"),
+    element.getAttribute("name"),
+    element.id,
+    element.className,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/reply|respond/.test(lowerHint) || element.closest('[class*="reply"], [data-testid*="reply"]')) {
+    return "reply";
+  }
+
+  if (/comment/.test(lowerHint) || element.closest('[class*="comment"], [data-testid*="comment"]')) {
+    return "comment";
+  }
+
+  if (element instanceof HTMLTextAreaElement || /subject|email|mail|compose/.test(lowerHint)) {
+    return "email";
+  }
+
+  return "general";
+}
+
+function extractReplyContext(element: EditableElement): string | undefined {
+  const editorText = readEditorText(element).replace(/\s+/g, " ").trim();
+  const containers = [
+    element.closest('[class*="reply"]'),
+    element.closest('[class*="comment"]'),
+    element.closest('[role="dialog"]'),
+    element.closest('article'),
+    element.parentElement,
+    element.parentElement?.parentElement,
+  ].filter(Boolean) as HTMLElement[];
+
+  const candidates: string[] = [];
+
+  for (const container of containers) {
+    const queryTargets = [
+      ...Array.from(
+        container.querySelectorAll(
+          'blockquote, [class*="quoted"], [class*="reply"], [class*="comment"], [class*="message"], [data-testid*="reply"], [data-testid*="comment"], [role="article"]'
+        )
+      ),
+      container.previousElementSibling,
+    ].filter(Boolean) as Element[];
+
+    for (const candidate of queryTargets) {
+      if (candidate === element || candidate.contains(element)) {
+        continue;
+      }
+
+      const text = (candidate.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text || text === editorText || text.length < 12) {
+        continue;
+      }
+
+      candidates.push(text.slice(0, 280));
+    }
+
+    if (candidates.length > 0) {
+      break;
+    }
+  }
+
+  return candidates[0];
+}
+
+function syncDraftToBackground(text: string, context: string, replyContext?: string): void {
   if (!currentSession) {
-    console.log("[AI Writing Assistant] 🔄 Session not found, initializing...");
+    pendingDraftSync = true;
+    initializeSession();
+    return;
+  }
+
+  currentSession.content = text;
+  currentSession.context = context;
+  currentSession.replyContext = replyContext;
+
+  sendMessageSafe(
+    {
+      type: "UPDATE_SESSION_DRAFT",
+      sessionId: currentSession.id,
+      text,
+      context,
+      replyContext,
+    },
+    () => {}
+  );
+}
+
+function handleEditorChange(target: EditableElement): void {
+  const text = readEditorText(target);
+  const normalizedText = text.replace(/\s+/g, " ").trim();
+  const contextType = detectContextType(target);
+  const replyContext = extractReplyContext(target);
+
+  if (!currentSession) {
+    pendingDraftSync = true;
     initializeSession();
   }
 
-  const text = ((target as any).innerText || (target as any).value || "") as string;
+  syncDraftToBackground(text, contextType, replyContext);
 
-  if (text.length < 3) {
+  if (normalizedText.length < 3) {
+    hideOverlay();
     return;
   }
-  
-  console.log("[AI Writing Assistant] ✍️ Text detected:", text.substring(0, 50));
 
   if (analysisTimeout !== null) {
     clearTimeout(analysisTimeout);
@@ -175,77 +306,130 @@ document.addEventListener("keyup", (e: any) => {
 
   analysisTimeout = window.setTimeout(() => {
     if (!currentSession) {
-      console.warn("[AI Writing Assistant] ⚠️ No session available, skipping analysis");
+      pendingDraftSync = true;
       return;
     }
 
-    console.log("[AI Writing Assistant] 📤 Sending ANALYZE_TEXT message...");
-    
     sendMessageSafe(
       {
         type: "ANALYZE_TEXT",
-        text: text,
-        context: "writing",
+        text,
+        sessionId: currentSession.id,
+        context: contextType,
         siteUrl: window.location.href,
+        replyContext,
       },
       (result) => {
         if (!result) {
-          console.error("[AI Writing Assistant] ❌ No response from ANALYZE_TEXT");
+          console.error("[AI Writing Assistant] No response from ANALYZE_TEXT");
           return;
         }
 
-        console.log("[AI Writing Assistant] 📥 ANALYZE_TEXT response received");
+        currentSession = currentSession
+          ? {
+              ...currentSession,
+              content: text,
+              context: contextType,
+              replyContext,
+              suggestions: result.suggestions || [],
+              textAnalysis: result.analysis ?? currentSession.textAnalysis,
+            }
+          : currentSession;
 
         if (result.suggestions && result.suggestions.length > 0) {
-          console.log("[AI Writing Assistant] 💡 Showing overlay with", result.suggestions.length, "suggestions");
           showOverlay({
-            text: text,
+            text,
             suggestions: result.suggestions,
             analysis: result.analysis,
             position: getCaretCoordinates(target),
           });
+          return;
         }
 
-        // Store analysis in session and persist
-        if (currentSession && result.analysis) {
-          const session = currentSession;
-          session.content = text;
-          session.textAnalysis = result.analysis;
-          session.suggestions = result.suggestions || [];
-          
-          chrome.storage.local.get("sessions", ({ sessions = [] }) => {
-            const allSessions = (sessions as WritingSession[]) || [];
-            const sessionIndex = allSessions.findIndex(s => s.id === session.id);
-            
-            if (sessionIndex >= 0) {
-              allSessions[sessionIndex] = session;
-              console.log("[AI Writing Assistant] 💾 Updated session in storage");
-            } else {
-              allSessions.push(session);
-              console.log("[AI Writing Assistant] ✨ Saved session to storage");
-            }
-            
-            chrome.storage.local.set({ sessions: allSessions }, () => {
-              if (chrome.runtime.lastError) {
-                console.error("[AI Writing Assistant] ❌ Storage error:", chrome.runtime.lastError.message);
-                return;
-              }
-              console.log("[AI Writing Assistant] ✅ Session persisted");
-            });
-          });
-        }
+        hideOverlay();
       }
     );
-  }, 1500);
+  }, 1200);
+}
+
+console.log("[AI Writing Assistant] Page loaded, testing connectivity...");
+testBackgroundWorker();
+announceContentScriptReady();
+
+setTimeout(() => {
+  initializeSession();
+  const initialEditor = findLikelyEditable();
+  if (initialEditor) {
+    activeEditor = initialEditor;
+  }
+}, 500);
+
+window.addEventListener("load", initializeSession);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !currentSession) {
+    initializeSession();
+  }
 });
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
+document.addEventListener("focusin", (event) => {
+  const target = getEventEditableTarget(event);
+  if (!target) {
+    return;
+  }
+
+  activeEditor = target;
+  if (!currentSession) {
+    initializeSession();
+  }
+}, true);
+
+document.addEventListener("beforeinput", (event) => {
+  const target = getEventEditableTarget(event);
+  if (!target) {
+    return;
+  }
+
+  activeEditor = target;
+  handleEditorChange(target);
+}, true);
+
+document.addEventListener("input", (event) => {
+  const target = getEventEditableTarget(event);
+  if (!target) {
+    return;
+  }
+
+  activeEditor = target;
+  handleEditorChange(target);
+}, true);
+
+document.addEventListener("keyup", (event) => {
+  const target = getEventEditableTarget(event);
+  if (!target) {
+    return;
+  }
+
+  activeEditor = target;
+  handleEditorChange(target);
+}, true);
+
+document.addEventListener("selectionchange", () => {
+  const target = findLikelyEditable();
+  if (!target) {
+    return;
+  }
+
+  activeEditor = target;
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
     hideOverlay();
   }
 });
 
-function getCaretCoordinates(element: any): { x: number; y: number } {
+function getCaretCoordinates(element: EditableElement): { x: number; y: number } {
   const rect = element.getBoundingClientRect();
   return {
     x: rect.left,

@@ -43,6 +43,11 @@ export default function WritingHistory({ sessions }: WritingHistoryProps) {
                       <p className="text-xs text-gray-500 mt-0.5">
                         {new Date(session.startTime).toLocaleString()}
                       </p>
+                      {session.replyContext && (
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-1">
+                          Replying to: {session.replyContext}
+                        </p>
+                      )}
                       <p className="text-xs text-gray-600 mt-1 line-clamp-1">{session.content}</p>
                     </div>
                     <div className="text-right">
@@ -160,6 +165,17 @@ function SessionDetailContent({
             </p>
           </div>
         </div>
+
+        {session.replyContext && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-gray-600 uppercase">Reply Context</h3>
+            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <p className="text-xs text-gray-700 leading-relaxed max-h-24 overflow-y-auto">
+                {session.replyContext}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
