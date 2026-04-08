@@ -1,8 +1,8 @@
 import { MemoryRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import Dashboard from "../pages/Dashboard";
-import Settings from "../pages/Settings";
-import WritingHistory from "../pages/WritingHistory";
+import Dashboard from "../pages/DashboardView";
+import Settings from "../pages/SettingsView";
+import WritingHistory from "../pages/WritingHistoryView";
 import type { WritingSession } from "../types";
 
 export default function Popup() {
@@ -49,13 +49,16 @@ export default function Popup() {
 
   return (
     <MemoryRouter initialEntries={["/"]}>
-      <div className="w-96 h-[600px] flex flex-col bg-white overflow-hidden">
+      <div className="relative h-[640px] w-[560px] overflow-hidden rounded-[28px] border border-white/50 bg-white/60 shadow-[0_24px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl">
+        <div className="flex h-full flex-col bg-[linear-gradient(180deg,rgba(255,255,255,0.82)_0%,rgba(247,250,252,0.92)_100%)]">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(22,124,128,0.16),transparent_65%)]" />
         <Routes>
           <Route path="/" element={<Dashboard sessions={sessions} />} />
           <Route path="/history" element={<WritingHistory sessions={sessions} />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
         <BottomNav />
+        </div>
       </div>
     </MemoryRouter>
   );
@@ -96,7 +99,7 @@ function BottomNav() {
   ];
 
   return (
-    <nav className="flex border-t border-gray-100 bg-white">
+    <nav className="border-t border-slate-200/70 bg-white/75 px-3 py-3 backdrop-blur">
       {tabs.map((tab) => {
         const active =
           tab.path === "/"
@@ -106,13 +109,15 @@ function BottomNav() {
           <button
             key={tab.path}
             onClick={() => navigate(tab.path)}
-            className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-xs transition-colors ${
+            className={`flex-1 rounded-2xl px-2 py-2 text-xs transition-all ${
               active
-                ? "text-violet-600 font-medium"
-                : "text-gray-400 hover:text-gray-600"
+                ? "bg-slate-900 text-white shadow-[0_12px_28px_rgba(15,23,42,0.18)]"
+                : "text-slate-500 hover:bg-white/80 hover:text-slate-800"
             }`}
           >
-            <span className={active ? "text-violet-600" : "text-gray-400"}>
+            <span className={`mx-auto mb-1 flex h-8 w-8 items-center justify-center rounded-full ${
+              active ? "bg-white/12 text-white" : "bg-slate-100 text-slate-500"
+            }`}>
               {tab.icon}
             </span>
             {tab.label}
