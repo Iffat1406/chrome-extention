@@ -1,16 +1,14 @@
 import { defineConfig } from "vite";
 
 export default defineConfig(async () => {
-  const [{ default: react }, { crx }, { default: tailwindcss }] = await Promise.all([
+  const [{ default: react }, { crx }] = await Promise.all([
     import("@vitejs/plugin-react"),
     import("@crxjs/vite-plugin"),
-    import("@tailwindcss/vite"),
   ]);
 
   return {
     plugins: [
       react(),
-      tailwindcss(),
       crx({
         manifest: {
           manifest_version: 3,

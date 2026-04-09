@@ -1,4 +1,13 @@
 import { useMemo } from "react";
+import {
+  Box,
+  Card,
+  CardContent,
+  Chip,
+  Paper,
+  Stack,
+  Typography,
+} from "@mui/material";
 import type { WritingSession } from "../types";
 
 interface DashboardProps {
@@ -31,120 +40,142 @@ export default function DashboardView({ sessions }: DashboardProps) {
   const recentSessions = sessions.slice(-4).reverse();
 
   return (
-    <div className="flex-1 overflow-auto">
-      <div className="space-y-4 p-4">
-        <section className="relative overflow-hidden rounded-[26px] border border-white/60 bg-slate-900 px-5 py-5 text-white shadow-[0_20px_50px_rgba(15,23,42,0.22)]">
-          <div className="absolute right-0 top-0 h-28 w-28 rounded-full bg-teal-400/20 blur-2xl" />
-          <div className="absolute bottom-0 left-0 h-24 w-24 rounded-full bg-amber-200/20 blur-2xl" />
-          <div className="relative space-y-3">
-            <div className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-200">
-              Writing cockpit
-            </div>
-            <div className="space-y-1">
-              <h1 className="text-[22px] font-semibold leading-tight">
-                Write with more clarity, less friction.
-              </h1>
-              <p className="max-w-[280px] text-xs leading-5 text-slate-300">
-                Track every draft, review AI feedback, and keep your writing sessions in one calm
-                place.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 pt-2">
-              <MiniMetric label="Sessions" value={stats.totalSessions} />
-              <MiniMetric label="Suggestions" value={stats.totalSuggestionsMade} />
-              <MiniMetric label="Applied" value={`${stats.acceptanceRate}%`} />
-            </div>
-          </div>
-        </section>
-
-        <section className="grid grid-cols-2 gap-3">
-          <StatCard
-            label="Characters tracked"
-            value={stats.totalTextWritten.toLocaleString()}
-            hint="Across all saved drafts"
-            tone="teal"
+    <Box sx={{ p: 2, display: "grid", gap: 1.5 }}>
+      <Card
+        sx={{
+          borderRadius: 3,
+          color: "common.white",
+          bgcolor: "#172338",
+          backgroundImage:
+            "radial-gradient(circle at 85% 10%, rgba(76,162,165,0.35), transparent 35%), radial-gradient(circle at 10% 100%, rgba(227,154,65,0.25), transparent 40%)",
+        }}
+      >
+        <CardContent sx={{ p: 2.5 }}>
+          <Chip
+            size="small"
+            label="Writing cockpit"
+            sx={{
+              mb: 1.5,
+              textTransform: "uppercase",
+              letterSpacing: 1.2,
+              bgcolor: "rgba(255,255,255,0.12)",
+              color: "common.white",
+              border: "1px solid rgba(255,255,255,0.18)",
+            }}
           />
-          <StatCard
-            label="Suggestions accepted"
-            value={stats.totalApplied}
-            hint="Applied improvements"
-            tone="amber"
-          />
-        </section>
+          <Typography variant="h6" sx={{ mb: 0.5, color: "common.white" }}>
+            Write with clarity and confidence
+          </Typography>
+          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", mb: 2 }}>
+            Track drafts, review suggestions, and monitor progress in one place.
+          </Typography>
 
-        <section className="rounded-[24px] border border-slate-200/70 bg-white/85 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1 }}>
+            <MetricTile label="Sessions" value={stats.totalSessions} />
+            <MetricTile label="Suggestions" value={stats.totalSuggestionsMade} />
+            <MetricTile label="Applied" value={`${stats.acceptanceRate}%`} />
+          </Box>
+        </CardContent>
+      </Card>
+
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.5 }}>
+        <StatCard
+          label="Characters tracked"
+          value={stats.totalTextWritten.toLocaleString()}
+          hint="Across all captured drafts"
+        />
+        <StatCard
+          label="Suggestions accepted"
+          value={stats.totalApplied}
+          hint="Applied writing improvements"
+        />
+      </Box>
+
+      <Card sx={{ borderRadius: 3 }}>
+        <CardContent sx={{ p: 2 }}>
+          <Stack
+            direction="row"
+            sx={{ mb: 1.5, justifyContent: "space-between", alignItems: "center" }}
+          >
+            <Box>
+              <Typography variant="caption" sx={{ textTransform: "uppercase", letterSpacing: 1.4, color: "text.secondary" }}>
                 Recent activity
-              </p>
-              <h2 className="mt-1 text-sm font-semibold text-slate-900">Latest writing sessions</h2>
-            </div>
-            <div className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-              {sessions.length} total
-            </div>
-          </div>
+              </Typography>
+              <Typography variant="subtitle1">Latest writing sessions</Typography>
+            </Box>
+            <Chip label={`${sessions.length} total`} size="small" variant="outlined" />
+          </Stack>
 
           {recentSessions.length > 0 ? (
-            <div className="space-y-2">
+            <Stack spacing={1}>
               {recentSessions.map((session) => (
-                <article
+                <Paper
                   key={session.id}
-                  className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3 transition-colors hover:border-teal-200 hover:bg-teal-50/40"
+                  variant="outlined"
+                  sx={{ p: 1.25, borderRadius: 2.2, bgcolor: "rgba(248,250,252,0.9)" }}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">{session.siteName}</p>
-                      <p className="mt-1 text-[11px] text-slate-500">
+                  <Stack
+                    direction="row"
+                    spacing={1.5}
+                    sx={{ justifyContent: "space-between", alignItems: "flex-start" }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                        {session.siteName}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
                         {new Date(session.startTime).toLocaleString()}
-                      </p>
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">
-                        {session.content || "Draft started but no text captured yet."}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm font-semibold text-slate-900">
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                        {(session.content || "Draft started but no text captured yet.").slice(0, 120)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
                         {session.suggestions.length}
-                      </p>
-                      <p className="text-[11px] text-slate-500">suggestions</p>
-                    </div>
-                  </div>
-                </article>
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        suggestions
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Paper>
               ))}
-            </div>
+            </Stack>
           ) : (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center">
-              <p className="text-sm font-medium text-slate-700">No writing sessions yet</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">
-                Open a chat, email, or comment box and start typing to populate your dashboard.
-              </p>
-            </div>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, textAlign: "center", bgcolor: "rgba(248,250,252,0.85)" }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                No writing sessions yet
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Start typing in chat, email, or comments to populate this dashboard.
+              </Typography>
+            </Paper>
           )}
-        </section>
-
-        <section className="rounded-[24px] border border-teal-100 bg-[linear-gradient(135deg,rgba(215,240,239,0.85)_0%,rgba(255,255,255,0.9)_100%)] p-4 shadow-[0_16px_35px_rgba(22,124,128,0.08)]">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-teal-700/80">
-            Workflow
-          </p>
-          <h2 className="mt-1 text-sm font-semibold text-slate-900">How the assistant helps</h2>
-          <div className="mt-3 grid gap-2">
-            <WorkflowRow text="Captures your draft while you type across supported sites." />
-            <WorkflowRow text="Scores grammar and clarity, then suggests tighter wording." />
-            <WorkflowRow text="Keeps a searchable trail of your recent writing sessions." />
-          </div>
-        </section>
-      </div>
-    </div>
+        </CardContent>
+      </Card>
+    </Box>
   );
 }
 
-function MiniMetric({ label, value }: { label: string; value: string | number }) {
+function MetricTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/10 px-3 py-3 backdrop-blur">
-      <p className="text-[11px] text-slate-300">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-white">{value}</p>
-    </div>
+    <Paper
+      elevation={0}
+      sx={{
+        p: 1,
+        borderRadius: 2,
+        bgcolor: "rgba(255,255,255,0.1)",
+        border: "1px solid rgba(255,255,255,0.15)",
+      }}
+    >
+      <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.75)" }}>
+        {label}
+      </Typography>
+      <Typography variant="subtitle1" sx={{ color: "common.white" }}>
+        {value}
+      </Typography>
+    </Paper>
   );
 }
 
@@ -152,34 +183,24 @@ function StatCard({
   label,
   value,
   hint,
-  tone,
 }: {
   label: string;
   value: string | number;
   hint: string;
-  tone: "teal" | "amber";
 }) {
-  const toneClasses =
-    tone === "teal"
-      ? "border-teal-100 bg-teal-50/80"
-      : "border-amber-100 bg-amber-50/90";
-
   return (
-    <div className={`rounded-[22px] border p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)] ${toneClasses}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{hint}</p>
-    </div>
-  );
-}
-
-function WorkflowRow({ text }: { text: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-2xl bg-white/70 px-3 py-3">
-      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-600 text-[10px] font-bold text-white">
-        ✓
-      </span>
-      <p className="text-xs leading-5 text-slate-700">{text}</p>
-    </div>
+    <Card sx={{ borderRadius: 3 }}>
+      <CardContent sx={{ p: 2 }}>
+        <Typography variant="caption" sx={{ textTransform: "uppercase", letterSpacing: 1.4, color: "text.secondary" }}>
+          {label}
+        </Typography>
+        <Typography variant="h6" sx={{ mt: 0.5 }}>
+          {value}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {hint}
+        </Typography>
+      </CardContent>
+    </Card>
   );
 }
