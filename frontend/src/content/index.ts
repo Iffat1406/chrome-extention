@@ -1,6 +1,6 @@
 import { TriggerDetector } from "./triggerDetector";
 import { showOverlay, hideOverlay } from "./overLayout";
-import type { WritingSession } from "../types";
+import type { AISuggestion, MessageType, TextAnalysis, WritingSession } from "../types";
 
 console.log("[AI Writing Assistant] Content script loaded on:", window.location.hostname);
 
@@ -11,14 +11,25 @@ let activeEditor: EditableElement | null = null;
 let pendingDraftSync = false;
 
 type EditableElement = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+type CreateSessionResponse = { success?: boolean; sessionId?: string } | null;
+type AnalyzeTextResponse =
+  | {
+      suggestions?: AISuggestion[];
+      analysis?: TextAnalysis;
+    }
+  | null;
 
-function sendMessageSafe(message: unknown, callback: (response: any) => void, timeoutMs = 5000): void {
-  console.log("[AI Writing Assistant] Preparing to send message:", (message as any).type);
+function sendMessageSafe(
+  message: MessageType,
+  callback: (response: unknown) => void,
+  timeoutMs = 5000
+): void {
+  console.log("[AI Writing Assistant] Preparing to send message:", message.type);
 
   let timeoutId: number | null = null;
   let respondedAlready = false;
 
-  const wrappedCallback = (response: any) => {
+  const wrappedCallback = (response: unknown) => {
     if (respondedAlready) {
       return;
     }
@@ -34,17 +45,18 @@ function sendMessageSafe(message: unknown, callback: (response: any) => void, ti
   timeoutId = window.setTimeout(() => {
     if (!respondedAlready) {
       respondedAlready = true;
-      console.error("[AI Writing Assistant] Background worker timeout for", (message as any).type);
+      console.error("[AI Writing Assistant] Background worker timeout for", message.type);
       callback(null);
     }
   }, timeoutMs);
 
   try {
     chrome.runtime.sendMessage(message, wrappedCallback);
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (timeoutId) clearTimeout(timeoutId);
     respondedAlready = true;
-    console.error("[AI Writing Assistant] sendMessage failed:", String(err?.message || err));
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("[AI Writing Assistant] sendMessage failed:", errorMessage);
     callback(null);
   }
 }
@@ -64,13 +76,15 @@ function initializeSession(): void {
       siteName,
     },
     (response) => {
-      if (!response?.success || !response.sessionId) {
-        console.error("[AI Writing Assistant] CREATE_SESSION failed:", response);
+      const createResponse = response as CreateSessionResponse;
+
+      if (!createResponse?.success || !createResponse.sessionId) {
+        console.error("[AI Writing Assistant] CREATE_SESSION failed:", createResponse);
         return;
       }
 
       currentSession = {
-        id: response.sessionId,
+        id: createResponse.sessionId,
         siteUrl: window.location.href,
         siteName,
         startTime: Date.now(),
@@ -320,7 +334,8 @@ function handleEditorChange(target: EditableElement): void {
         replyContext,
       },
       (result) => {
-        if (!result) {
+        const analysisResult = result as AnalyzeTextResponse;
+        if (!analysisResult) {
           console.error("[AI Writing Assistant] No response from ANALYZE_TEXT");
           return;
         }
@@ -331,16 +346,22 @@ function handleEditorChange(target: EditableElement): void {
               content: text,
               context: contextType,
               replyContext,
-              suggestions: result.suggestions || [],
-              textAnalysis: result.analysis ?? currentSession.textAnalysis,
+              suggestions: analysisResult.suggestions || [],
+              textAnalysis: analysisResult.analysis ?? currentSession.textAnalysis,
             }
           : currentSession;
 
-        if (result.suggestions && result.suggestions.length > 0) {
+        if (analysisResult.suggestions && analysisResult.suggestions.length > 0) {
+          const overlayAnalysis = analysisResult.analysis ?? currentSession?.textAnalysis;
+          if (!overlayAnalysis) {
+            hideOverlay();
+            return;
+          }
+
           showOverlay({
             text,
-            suggestions: result.suggestions,
-            analysis: result.analysis,
+            suggestions: analysisResult.suggestions,
+            analysis: overlayAnalysis,
             position: getCaretCoordinates(target),
           });
           return;

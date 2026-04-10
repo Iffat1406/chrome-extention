@@ -108,10 +108,14 @@ function SessionDetail({
   session: WritingSession;
   onBack: () => void;
 }) {
-  const now = Date.now();
-  const duration = ((session.endTime ?? now) - session.startTime) / 1000;
-  const durationStr =
-    duration < 60 ? `${Math.round(duration)}s active` : `${Math.round(duration / 60)}m active`;
+  const durationStr = session.endTime
+    ? (() => {
+        const duration = (session.endTime - session.startTime) / 1000;
+        return duration < 60
+          ? `${Math.round(duration)}s active`
+          : `${Math.round(duration / 60)}m active`;
+      })()
+    : "Active";
 
   return (
     <Box sx={{ p: 2, display: "grid", gap: 1.5 }}>

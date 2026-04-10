@@ -1,4 +1,10 @@
-import type { Settings, WritingSession, MessageType } from "../types";
+import type {
+  AISuggestion,
+  MessageType,
+  Settings,
+  TextAnalysis,
+  WritingSession,
+} from "../types";
 import {
   callGeminiAPI,
   getDefaultAnalysis,
@@ -228,8 +234,8 @@ function storeSessionContent(
 // ✅ NEW: Update session after AI analysis
 function updateSessionAnalysis(
   sessionId: string,
-  suggestions: any[],
-  analysis: any
+  suggestions: AISuggestion[],
+  analysis: TextAnalysis
 ): void {
   const session = sessionsCache.find(s => s.id === sessionId);
   if (!session) {
@@ -280,7 +286,7 @@ async function analyzeText(
   sessionId: string,
   context?: string,
   replyContext?: string
-): Promise<{ suggestions: any[]; analysis: any }> {
+): Promise<{ suggestions: AISuggestion[]; analysis: TextAnalysis }> {
   const settings = await getStorageSettings();
 
   // ✅ STORE TEXT IMMEDIATELY - even if AI doesn't run

@@ -5,26 +5,28 @@ export function useHistory() {
   const [sessions, setSessions] = useState<WritingSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadSessions();
-
-    // Listen for storage changes
-    const handleStorageChange = (changes: any) => {
-      if (changes.sessions) {
-        setSessions(changes.sessions.newValue || []);
-      }
-    };
-
-    chrome.storage.onChanged.addListener(handleStorageChange);
-    return () => chrome.storage.onChanged.removeListener(handleStorageChange);
-  }, []);
-
   const loadSessions = () => {
     chrome.storage.local.get("sessions", ({ sessions = [] }) => {
       setSessions(sessions as WritingSession[]);
       setIsLoading(false);
     });
   };
+
+  useEffect(() => {
+    loadSessions();
+
+    // Listen for storage changes
+    const handleStorageChange = (
+      changes: Record<string, chrome.storage.StorageChange>
+    ) => {
+      if (changes.sessions) {
+        setSessions((changes.sessions.newValue as WritingSession[] | undefined) ?? []);
+      }
+    };
+
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    return () => chrome.storage.onChanged.removeListener(handleStorageChange);
+  }, []);
 
   const clearHistory = () => {
     chrome.storage.local.remove("sessions", () => {

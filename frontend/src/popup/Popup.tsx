@@ -20,7 +20,7 @@ import type { WritingSession } from "../types";
 
 export default function Popup() {
   const [sessions, setSessions] = useState<WritingSession[]>([]);
-  const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
+  const [lastRefreshAt, setLastRefreshAt] = useState<number | null>(null);
 
   useEffect(() => {
     const loadSessions = async () => {
@@ -55,10 +55,13 @@ export default function Popup() {
     };
   }, []);
 
-  const lastSyncLabel = new Date(lastRefreshAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const lastSyncLabel =
+    lastRefreshAt === null
+      ? "--:--"
+      : new Date(lastRefreshAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
   return (
     <MemoryRouter initialEntries={["/"]}>
