@@ -8,6 +8,7 @@ import type {
 import {
   callGeminiAPI,
   getDefaultAnalysis,
+  getLocalFallbackResult,
   detectReplyContext,
   sanitizeReplyContext,
 } from "./aiEngine";
@@ -294,11 +295,18 @@ async function analyzeText(
   storeSessionContent(sessionId, text, context, replyContext);
 
   if (!settings.aiEnabled || !settings.geminiApiKey) {
-    console.log("[Background Worker] ℹ️ AI disabled, returning default analysis");
-    return {
-      suggestions: [],
-      analysis: getDefaultAnalysis(),
-    };
+    if (!settings.aiEnabled) {
+      console.log("[Background Worker] AI disabled, returning default analysis");
+      return {
+        suggestions: [],
+        analysis: getDefaultAnalysis(),
+      };
+    }
+
+    console.log("[Background Worker] API key missing, using local fallback suggestions");
+    const localResult = getLocalFallbackResult(text, settings.analysisMode, replyContext);
+    updateSessionAnalysis(sessionId, localResult.suggestions, localResult.analysis);
+    return localResult;
   }
 
   // ✅ Check if we should analyze (reduce API calls)
@@ -336,10 +344,9 @@ async function analyzeText(
       analysis: response.analysis || getDefaultAnalysis(),
     };
   } catch (err) {
-    console.error("[Background Worker] ❌ AI analysis failed:", err);
-    return {
-      suggestions: [],
-      analysis: getDefaultAnalysis(),
-    };
+    console.error("[Background Worker] AI analysis failed, using local fallback:", err);
+    const localResult = getLocalFallbackResult(text, settings.analysisMode, replyContext);
+    updateSessionAnalysis(sessionId, localResult.suggestions, localResult.analysis);
+    return localResult;
   }
 }
